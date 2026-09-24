@@ -1,0 +1,1 @@
+# Core package - Authentication and Graph client

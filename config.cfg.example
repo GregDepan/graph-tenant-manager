@@ -1,0 +1,41 @@
+# Configuration pour Graph Tenant Manager
+# Copiez ce fichier en config.cfg et remplissez avec vos informations
+
+[azure]
+# Application (client) ID - À récupérer de votre inscription d'application dans Entra ID
+clientId = VOTRE_CLIENT_ID_ICI
+
+# Tenant ID (ou 'common' pour multi-tenant)
+tenantId = common
+
+# Scopes requis pour l'authentification
+# Séparez les scopes par des espaces
+# Note: ces scopes doivent être consentis par un admin du client (Grant admin consent)
+graphUserScopes = Directory.Read.All Directory.ReadWrite.All User.Read.All User.ReadWrite.All Group.Read.All Group.ReadWrite.All GroupMember.Read.All Device.Read.All DeviceManagementManagedDevices.Read.All User.ReadWrite.All Organization.Read.All AuditLog.Read.All
+
+[tenants]
+# Liste de vos tenants clients (optionnel - peut être ajouté via l'interface)
+# Format: nom_affiche = tenant_id,domaine,notes
+# Exemple:
+# client1 = 12345678-1234-1234-1234-123456789abc,contoso.com,Client principal
+# client2 = 87654321-4321-4321-4321-cba987654321,fabrikam.com,Environnement de test
+
+[ui]
+# Thème de l'interface: default, alt, clam, victor, breeze
+theme = clam
+
+# Langue: fr, en
+language = fr
+
+# Intervalle de rafraîchissement automatique (secondes)
+refresh_interval = 300
+
+[logging]
+# Niveau de log: DEBUG, INFO, WARNING, ERROR
+level = INFO
+
+# Fichier de log (laisser vide pour désactiver)
+file = logs/graph_manager.log
+
+# Taille maximale du fichier de log (MB)
+max_size = 10
