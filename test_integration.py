@@ -143,6 +143,20 @@ check("auth: 17 scopes par défaut (v2.1 workloads)",
       and "Channel.ReadBasic.All" in auth.scopes and "TeamMember.Read.All" in auth.scopes)
 check("auth: custom_app False", auth.custom_app is False)
 
+# v2.1.3 : scopes cœur / workloads séparés + repli consentement
+from core.auth import CORE_SCOPES_LIST, WORKLOAD_SCOPES_LIST, _is_consent_error, _scopes_list
+check("auth: CORE_SCOPES = 11 scopes v2.0", len(CORE_SCOPES_LIST) == 11)
+check("auth: WORKLOAD_SCOPES = 6 scopes v2.1", len(WORKLOAD_SCOPES_LIST) == 6)
+check("auth: DEFAULT = cœur + workloads (17)", len(_scopes_list("a b c")) == 3)
+check("auth: _is_consent_error AADSTS65001", _is_consent_error(Exception("AADSTS65001: user has not consented")))
+check("auth: _is_consent_error négatif", not _is_consent_error(Exception("network unreachable")))
+check("auth: has_workload_scopes True par défaut (non connecté)", auth.has_workload_scopes() is True)
+auth._scopes_by_tenant["t1"] = list(CORE_SCOPES_LIST)
+check("auth: has_workload_scopes False en permissions réduites", auth.has_workload_scopes("t1") is False)
+auth._scopes_by_tenant["t2"] = list(CORE_SCOPES_LIST) + list(WORKLOAD_SCOPES_LIST)
+check("auth: has_workload_scopes True avec scopes complets", auth.has_workload_scopes("t2") is True)
+auth._scopes_by_tenant.clear()
+
 auth_custom = TenantAuthManager({"clientId": "mon-app-perso"})
 check("auth: surcharge clientId possible", auth_custom.client_id == "mon-app-perso" and auth_custom.custom_app is True)
 
@@ -592,12 +606,18 @@ except Exception:
 if tk:
     root = tk.Tk()
     root.withdraw()
+    # NB : sous Xvfb sans window manager, les Toplevel ne sont jamais
+    # « mappés » par le serveur X → wait_visibility() attendrait pour
+    # toujours. On le neutralise pour TOUTE cette section de test
+    # (en usage réel avec un WM, le comportement est inchangé).
+    tk.Toplevel.wait_visibility = lambda self, *a, **k: None
     # Neutralise le réseau de l'updater : le check auto planifié par
     # l'app (after 800ms) trouvera fetch_latest_release patché → None
     # silencieux, aucun appel réel vers GitHub pendant le test headless.
     from core import updater as _upd
     _orig_fetch = _upd.fetch_latest_release
     _upd.fetch_latest_release = lambda timeout=120: None
+    from gui.dialogs import UnlicensedUsersDialog, AssignLicenseDialog, UserDetailDialog
     config = {
         "clientId": "test", "tenantId": "common",
         "graphUserScopes": "User.Read.All", "theme": "clam",
@@ -617,11 +637,40 @@ if tk:
     app._init_services()
     check("gui: _init_services instancie tout",
           app.users_service is not None and app.licenses_service is not None)
-    # rendu users via le thread
+    # rendu users via le thread — en prod, _load_users charge aussi
+    # l'inventaire licences (pour les noms) ; on le simule ici.
+    app._licenses_data = [{"sku_id": "sku-SPE_E3", "part_number": "SPE_E3",
+                           "display_name": "Microsoft 365 E3",
+                           "total": 25, "consumed": 24, "available": 1,
+                           "warning": True}]
     app._render_users([{"id": "u1", "display_name": "A", "email": "a@c.com",
                         "job_title": "", "department": "", "has_license": True,
-                        "account_enabled": True, "user_principal_name": "a@c.com"}])
-    check("gui: _render_users remplit le tree", len(app.users_tree.get_children()) == 1)
+                        "license_skus": ["sku-SPE_E3"], "account_enabled": True,
+                        "user_principal_name": "a@c.com"},
+                       {"id": "u2", "display_name": "B", "email": "b@c.com",
+                        "job_title": "", "department": "", "has_license": False,
+                        "license_skus": [], "account_enabled": True,
+                        "user_principal_name": "b@c.com"}])
+    check("gui: _render_users remplit le tree", len(app.users_tree.get_children()) == 2)
+    # v2.1.3 : licences par user avec noms commerciaux (pas de croix)
+    cell = app.users_tree.item("u1", "values")[4]
+    check("gui: licences par user (nom commercial)", "Microsoft 365 E3" in cell and "✔" in cell, cell)
+    cell2 = app.users_tree.item("u2", "values")[4]
+    check("gui: sans licence → « ✖ Aucune »", "Aucune" in cell2 and "✖" in cell2, cell2)
+    # _user_license_cell avec GUID inconnu de l'inventaire → fallback part number
+    cell3 = app._user_license_cell({"license_skus": ["SPE_E5"]})
+    check("gui: part number non-inventaire mappé FR", "Microsoft 365 E5" in cell3, cell3)
+    cell4 = app._user_license_cell({"license_skus": [
+        "c2a2d3a4-0000-1111-2222-333344445555"]})
+    check("gui: GUID inconnu affiché tel quel", "c2a2d3a4" in cell4, cell4)
+    # UserDetailDialog avec map de noms
+    d4 = UserDetailDialog(root, {"id": "u1", "display_name": "A",
+                                 "user_principal_name": "a@c.com", "email": "",
+                                 "has_license": True,
+                                 "license_skus": ["sku-SPE_E3"]},
+                          license_names={"sku-SPE_E3": "Microsoft 365 E3"})
+    check("gui: UserDetailDialog instancié", d4 is not None)
+    d4.destroy()
     # rendu licences avec warning tag
     app._render_licenses([{"sku_id": "s1", "part_number": "P", "display_name": "Prod",
                            "total": 10, "consumed": 9, "available": 1, "warning": True}])
@@ -672,7 +721,6 @@ if tk:
     # toujours. On le neutralise pour ce test uniquement (en usage réel
     # avec un WM, le comportement est inchangé).
     tk.Toplevel.wait_visibility = lambda self, *a, **k: None
-    from gui.dialogs import UnlicensedUsersDialog, AssignLicenseDialog
     d1 = UnlicensedUsersDialog(root, [{"id": "u1", "display_name": "A",
                                        "email": "a@c.com", "has_license": False}])
     check("gui: UnlicensedUsersDialog instancié (fix __initasks__)", d1 is not None)

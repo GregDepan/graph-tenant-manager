@@ -43,6 +43,19 @@ APP_TITLE = "🏢 Graph Tenant Manager"
 from core.app_info import APP_VERSION as APP_VERSION_LOCAL  # noqa: E402
 
 
+def _looks_like_guid(s: str) -> bool:
+    """True si la chaîne ressemble à un GUID (36 chars, 4 tirets)."""
+    s = str(s)
+    if len(s) != 36 or s.count("-") != 4:
+        return False
+    try:
+        parts = s.split("-")
+        return all(len(p) in (8, 4, 4, 4, 12) and all(c in "0123456789abcdefABCDEF" for c in p)
+                   for p in [parts[0], parts[1], parts[2], parts[3], parts[4]])
+    except Exception:
+        return False
+
+
 class GraphTenantManagerApp:
     """Application principale de gestion multi-tenants Microsoft Graph."""
 
@@ -386,6 +399,10 @@ class GraphTenantManagerApp:
         elif tab == 4 and not self._licenses_data:
             self._load_licenses()
         elif 5 <= tab <= 8:
+            if self.current_tenant_id and not self.auth_manager.has_workload_scopes(self.current_tenant_id):
+                self._set_idle("⚠️ Permissions réduites : onglet workload indisponible "
+                               "jusqu'au consentement admin des nouveaux scopes.")
+                return
             panel = self._workload_panel(tab)
             if panel is not None and not panel.data:
                 panel.refresh()
@@ -461,21 +478,66 @@ class GraphTenantManagerApp:
 
         self.users_tree = self._make_tree(
             self.users_tab,
-            ["Nom", "Email", "Poste", "Département", "Licence", "Actif", "UPN"],
-            widths=[200, 240, 130, 130, 80, 60, 220],
+            ["Nom", "Email", "Poste", "Département", "Licences", "Actif", "UPN"],
+            widths=[200, 240, 130, 130, 220, 60, 220],
         )
         self.users_tree.bind("<Double-1>", lambda e: self._user_details())
         self.users_tree.tag_configure('disabled_account', foreground='#888888')
 
     def _load_users(self):
-        if not self.users_service:
+        users_service = self.users_service
+        licenses_service = self.licenses_service
+        if not users_service:
             return
         self._set_busy("Chargement des utilisateurs...")
+
+        def factory():
+            # v2.1.3 : charge aussi l'inventaire licences si absent —
+            # nécessaire pour afficher les noms de licences par utilisateur.
+            async def inner():
+                users = await users_service.get_all_users_formatted()
+                if not self._licenses_data and licenses_service:
+                    try:
+                        self._licenses_data = await licenses_service.get_inventory()
+                    except Exception:
+                        pass  # l'affichage retombe sur les part numbers
+                return users
+            return inner()
+
         self.runner.run_in_thread(
-            lambda: self.users_service.get_all_users_formatted(),
+            factory,
             callback=lambda result: self.root.after(0, lambda: self._render_users(result)),
             error_callback=self._make_error_cb("Chargement des utilisateurs"),
         )
+
+    def _license_names_map(self) -> Dict[str, str]:
+        """
+        Map {sku_id GUID -> nom commercial} pour afficher les licences par
+        utilisateur (v2.1.3). Se base sur l'inventaire chargé ; sinon vide.
+        """
+        m: Dict[str, str] = {}
+        for lic in (self._licenses_data or []):
+            sid = lic.get("sku_id") or ""
+            if sid:
+                m[str(sid)] = lic.get("display_name") or lic.get("part_number") or ""
+        return m
+
+    def _user_license_cell(self, u: Dict) -> str:
+        """Cellule « Licences » pour le tableau Utilisateurs : noms lisibles."""
+        skus = u.get("license_skus") or []
+        if not skus:
+            return "✖ Aucune"
+        m = self._license_names_map()
+        names = []
+        for s in skus:
+            s = str(s)
+            name = m.get(s)
+            if not name and s and not _looks_like_guid(s):
+                # part number inconnu de l'inventaire → nom FR si mappé
+                from services.licenses_service import _sku_display_name
+                name = _sku_display_name(s)
+            names.append(name or s)
+        return "✔ " + ", ".join(names)
 
     def _render_users(self, users):
         self._users_data = users
@@ -487,7 +549,7 @@ class GraphTenantManagerApp:
                 u.get('email', ''),
                 u.get('job_title', ''),
                 u.get('department', ''),
-                "✔" if u.get('has_license') else "✖",
+                self._user_license_cell(u),
                 "Oui" if enabled else "Non",
                 u.get('user_principal_name', ''),
             ), tags=('disabled_account',) if not enabled else ())
@@ -553,7 +615,7 @@ class GraphTenantManagerApp:
     def _user_details(self):
         user = self._selected_user()
         if user:
-            UserDetailDialog(self.root, user)
+            UserDetailDialog(self.root, user, license_names=self._license_names_map())
 
     def _user_create(self):
         if not self.users_service:
@@ -1094,12 +1156,30 @@ class GraphTenantManagerApp:
     def _register_connected_tenant(self, tid: str):
         """Après connexion : wiring complet + affichage."""
         client = self.auth_manager.get_client(tid)
+        if client is None:
+            # reconnect_silent peut retourner None (cache expiré) :
+            # ne jamais enregistrer un tenant sans client Graph.
+            self._set_idle()
+            messagebox.showerror(
+                "Connexion",
+                "Le tenant n'a pas pu être initialisé (cache d'authentification "
+                "expiré). Utilisez « Connecter » pour une nouvelle connexion.",
+            )
+            return
         self.graph_wrapper = GraphClientWrapper(client)
         self.current_tenant_id = tid
         self._init_services()
         self._update_tenant_list()
         self.tenant_var.set(self._tenant_label(tid))
         self._clear_all_data()
+        reduced = not self.auth_manager.has_workload_scopes(tid)
+        if reduced:
+            self.connection_label.config(
+                text="🟢 En ligne (permissions réduites — onglets workloads indisponibles "
+                     "jusqu'au consentement admin des nouveaux scopes)",
+            )
+        else:
+            self.connection_label.config(text="🟢 En ligne")
         self._load_dashboard()
 
     def _try_silent_reconnect(self):

@@ -532,10 +532,15 @@ class UserDetailDialog(BaseDialog):
     """
     Dialogue en lecture seule présentant les détails d'un utilisateur,
     avec un bouton pour copier l'UPN dans le presse-papiers.
+
+    v2.1.3 : license_names (optionnel) = map {sku_id -> nom commercial}
+    pour afficher les licences assignées en noms lisibles.
     """
 
-    def __init__(self, parent: tk.Misc, user: Dict[str, Any]):
+    def __init__(self, parent: tk.Misc, user: Dict[str, Any],
+                 license_names: Optional[Dict[str, str]] = None):
         self.user = user
+        self.license_names = license_names or {}
         super().__init__(parent, "👤 Détails de l'utilisateur", width=560)
         # BaseDialog crée les boutons APRÈS _build_ui : lecture seule →
         # un seul bouton Fermer
@@ -573,9 +578,10 @@ class UserDetailDialog(BaseDialog):
 
         skus = self.user.get("license_skus") or []
         if skus:
+            names = [self.license_names.get(str(s), str(s)) for s in skus]
             ttk.Label(form, text="Licences assignées :").grid(
                 row=row, column=0, sticky=tk.W, padx=(0, 10), pady=3)
-            ttk.Label(form, text=", ".join(str(s) for s in skus), wraplength=380).grid(
+            ttk.Label(form, text=", ".join(names), wraplength=380).grid(
                 row=row, column=1, sticky=tk.W, pady=3)
             row += 1
 

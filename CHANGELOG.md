@@ -1,5 +1,32 @@
 # Changelog — Graph Tenant Manager
 
+## v2.1.3 (25/09/2026) — Licences par utilisateur + connexion résiliente
+
+### 🔑 Licences affichées par utilisateur
+- L'onglet Utilisateurs affiche maintenant les **noms des licences
+  assignées** dans la colonne « Licences » (« ✔ Microsoft 365 E3 ») au
+  lieu d'un simple ✔/✖. Les GUID sont traduits en noms commerciaux via
+  l'inventaire `subscribedSkus` (chargé en même temps que les users).
+- Sans licence : « ✖ Aucune ». Colonne élargie (220 px).
+- Le dialogue de détails utilisateur (double-clic) affiche aussi les
+  noms complets au lieu des GUID bruts.
+
+### 🔐 Fix « ajout de tenant cassé »
+- Cause : les 6 nouveaux scopes v2.1 (SharePoint/OneDrive/Exchange/
+  Teams) exigent un **consentement admin** chez le client. Tant qu'il
+  n'est pas accordé, AAD refusait **toute** la connexion (AADSTS65001).
+- Désormais : tentative complète → si refus de consentement, **repli
+  automatique en permissions réduites** (scopes cœur v2.0 déjà
+  consentis) : la connexion réussit, les onglets workloads affichent un
+  message explicite au lieu d'une erreur Graph brut.
+- La reconnexion silencieuse ne casse plus avec les caches v2.0 (11
+  scopes) : elle se replie aussi sur les scopes cœur au lieu d'échouer.
+- Fix silencieux : `reconnect_silent` pouvait retourner `None` (cache
+  expiré) et la GUI enregistrait quand même un tenant cassé →
+  désormais contrôlé + message clair.
+- Barre de statut : « 🟢 En ligne (permissions réduites…) » quand les
+  onglets workloads ne sont pas accessibles.
+
 ## v2.1 (25/09/2026) — Workloads M365 + mises à jour automatiques
 
 ### 🔄 Mises à jour automatiques
