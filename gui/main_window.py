@@ -78,6 +78,8 @@ class GraphTenantManagerApp:
 
         self.current_tenant_id: Optional[str] = None
         self.tenant_info: Optional[Dict[str, Any]] = None
+        # v2.1.5 : enhancers tri/filtre par treeview (id(tree) -> enhancer)
+        self._tree_enhancers: Dict[int, Any] = {}
 
         # Caches de données par onglet
         self._users_data: List[Dict] = []
@@ -329,10 +331,29 @@ class GraphTenantManagerApp:
         )
         self.connection_label.pack(side=tk.RIGHT)
 
-    def _make_tree(self, parent, columns, widths=None):
-        """Treeview standard avec scrollbar."""
+    def _make_tree(self, parent, columns, widths=None, filterable=True):
+        """Treeview standard + scrollbar, triable et filtrable (v2.1.5).
+
+        filterable=True : ajoute une entrée de filtre instantané au-dessus
+        du tableau (multi-termes, insensible aux accents) + compteur de
+        lignes. Le tri par clic sur en-tête est TOUJOURS actif.
+        """
+        from gui.table_utils import TableEnhancer
+
         frame = ttk.Frame(parent)
         frame.pack(fill=tk.BOTH, expand=True)
+
+        enhancer_vars = {}
+        if filterable:
+            filter_bar = ttk.Frame(frame)
+            filter_bar.pack(fill=tk.X, pady=(0, 2))
+            filter_var = tk.StringVar()
+            count_label = ttk.Label(filter_bar, text="", foreground="gray")
+            entry = ttk.Entry(filter_bar, textvariable=filter_var)
+            entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
+            count_label.pack(side=tk.LEFT, padx=(8, 0))
+            enhancer_vars = {"var": filter_var, "label": count_label}
+
         tree = ttk.Treeview(frame, columns=columns, show='headings', selectmode='browse')
         for i, col in enumerate(columns):
             tree.heading(col, text=col)
@@ -341,6 +362,13 @@ class GraphTenantManagerApp:
         tree.configure(yscrollcommand=scroll.set)
         tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         scroll.pack(side=tk.RIGHT, fill=tk.Y)
+
+        enh = TableEnhancer(
+            tree,
+            filter_var=enhancer_vars.get("var"),
+            count_label=enhancer_vars.get("label"),
+        )
+        self._tree_enhancers[id(tree)] = enh
         return tree
 
     def _set_busy(self, msg):
@@ -1186,6 +1214,9 @@ class GraphTenantManagerApp:
         """
         Au démarrage : si des tenants sont déjà autorisés sur ce poste,
         propose leur reconnexion en un clic (cache de tokens).
+
+        v2.1.5 : propose TOUS les tenants sauvegardés (l'ancien code ne
+        rebranchait que le premier) ; chacun reçoit un bouton.
         """
         saved = self.auth_manager.list_saved_tenants()
         if not saved:
@@ -1194,17 +1225,19 @@ class GraphTenantManagerApp:
         def ask():
             names = "\n".join(
                 f"• {s['tenant_name'] or s['username'] or s['tenant_id']}"
-                for s in saved[:5]
+                for s in saved[:10]
             )
             answer = messagebox.askyesno(
                 "Reconnexion",
                 f"Tenants déjà autorisés sur ce poste :\n\n{names}\n\n"
-                "Se reconnecter silencieusement maintenant ?\n"
-                "(aucune fenêtre de connexion ne s'ouvrira)",
+                "Les reconnecter silencieusement maintenant ?\n"
+                "(aucune fenêtre de connexion ne s'ouvrira — ils seront "
+                "tous disponibles dans le sélecteur)",
                 icon='question',
             )
             if answer:
-                self._do_silent_reconnect(saved[0]['tenant_id'])
+                for s in saved:
+                    self._do_silent_reconnect(s['tenant_id'])
         self.root.after(200, ask)
 
     def _do_silent_reconnect(self, tid: str):
@@ -1270,21 +1303,43 @@ class GraphTenantManagerApp:
         self._show_welcome()
 
     def _update_tenant_list(self):
+        """Met à jour le dropdown des tenants connectés.
+
+        v2.1.5 : affiche les libellés lisibles (nom > username > GUID)
+        au lieu des GUID bruts, et ne change PLUS la sélection courante
+        (l'ancien current(0) écrasait la bascule vers un autre tenant).
+        """
         tenants = self.auth_manager.list_connected_tenants()
-        self.tenant_combo['values'] = tenants
-        if tenants:
-            self.tenant_combo.current(0)
+        # Libellé unique par tenant (suffixe si collision de noms)
+        labels = {}
+        used = set()
+        for tid in tenants:
+            label = self._tenant_label(tid) or tid
+            base = label
+            n = 2
+            while label in used:
+                label = f"{base} ({n})"
+                n += 1
+            used.add(label)
+            labels[tid] = label
+        self._tenant_labels = labels
+        self.tenant_combo['values'] = [labels[tid] for tid in tenants]
+        # Sélection = tenant courant, sans le changer
+        current_label = labels.get(self.current_tenant_id or "")
+        if current_label:
+            self.tenant_var.set(current_label)
 
     def _on_tenant_selected(self, event):
         """Bascule vers un tenant déjà connecté (switch mémoire, instantané)."""
-        tid = self.tenant_var.get()
+        if not getattr(self, "_tenant_labels", None):
+            return
+        label = self.tenant_var.get()
+        # Résolution libellé -> GUID via la map interne (fiable, même
+        # si deux tenants portent le même nom)
+        rev = {v: k for k, v in self._tenant_labels.items()}
+        tid = rev.get(label)
         if not tid:
             return
-        # le combo affiche des libellés → retrouver le GUID
-        for candidate in self.auth_manager.list_connected_tenants():
-            if tid in (candidate, self._tenant_label(candidate)):
-                tid = candidate
-                break
         if tid == self.current_tenant_id:
             return
         try:

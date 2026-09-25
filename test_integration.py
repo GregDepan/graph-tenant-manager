@@ -742,7 +742,70 @@ if tk:
                            [{"consumed": 9, "total": 10, "available": 1, "warning": True}])
     check("gui: dashboard affiché", len(app.dashboard_tab.winfo_children()) > 0)
 
-    # ---- 5b. Instanciation des dialogues (régression __initasks__ v2.0) ----
+    # ---- 5b. Tri + filtre intelligents (v2.1.5) ----
+    print("  [5b] Tri/filtre tableaux (TableEnhancer)")
+    from gui.table_utils import TableEnhancer, normalize, _leading_number
+    # Détection unités : « 24 Go » > « 980 Mo » ; accents ignorés
+    check("tri/filtre: _leading_number Go", _leading_number("24 Go") == 24 * 1024)
+    check("tri/filtre: _leading_number Mo", _leading_number("980 Mo") == 980)
+    check("tri/filtre: _leading_number ko < Mo", _leading_number("500 ko") < _leading_number("980 Mo"))
+    check("tri/filtre: _leading_number virgule", _leading_number("1,5 Go") == 1.5 * 1024)
+    check("tri/filtre: _leading_number pourcent", _leading_number("95 %") == 95)
+    check("tri/filtre: normalize accents", normalize("Zoé") == "zoe")
+    check("tri/filtre: normalize casse", normalize("MiCRoSoft") == "microsoft")
+    # Tri réel + filtre sur un tree de test
+    ttree = tk.Toplevel(root)
+    ttree.withdraw()
+    tv = app._make_tree(ttree, ["Nom", "Taille"], widths=[120, 80])
+    tv.insert("", "end", iid="a", values=("Zoé", "24 Go"))
+    tv.insert("", "end", iid="b", values=("Alain", "500 ko"))
+    tv.insert("", "end", iid="c", values=("Béa", "980 Mo"))
+    enh = app._tree_enhancers[id(tv)]
+    enh.sort_by("Taille")
+    order = [tv.item(i, "values")[0] for i in tv.get_children()]
+    check("tri/filtre: tri numérique unités", order == ["Alain", "Béa", "Zoé"], str(order))
+    enh.sort_by("Taille")
+    order = [tv.item(i, "values")[0] for i in tv.get_children()]
+    check("tri/filtre: tri desc", order == ["Zoé", "Béa", "Alain"], str(order))
+    enh.sort_by("Nom")
+    order = [tv.item(i, "values")[0] for i in tv.get_children()]
+    check("tri/filtre: tri texte accents", order == ["Alain", "Béa", "Zoé"], str(order))
+    # Filtre
+    enh.filter_var = tk.StringVar()
+    enh.filter_var.trace_add("write", lambda *_: enh.refresh_view())
+    enh.filter_var.set("zoe")
+    rows = [tv.item(i, "values")[0] for i in tv.get_children()]
+    check("tri/filtre: filtre accent-insensible", rows == ["Zoé"], str(rows))
+    enh.filter_var.set("")
+    check("tri/filtre: filtre vidé restaure", len(tv.get_children()) == 3)
+    # Multi-tenants : dropdown affiche des libellés et la bascule fonctionne
+    class FakeAuthManager:
+        def __init__(self):
+            self._clients = {"t-aaa": "client-aaa", "t-bbb": "client-bbb"}
+        def list_connected_tenants(self):
+            return list(self._clients.keys())
+        def account_info(self, tid):
+            return {"tenant_name": "", "username": f"u@{tid}", "tenant_id": tid}
+        def set_current_tenant(self, tid):
+            return tid in self._clients
+        def get_client(self, tid=None):
+            return self._clients.get(tid)
+        def has_workload_scopes(self, tid=None):
+            return True
+    fake_auth = FakeAuthManager()
+    app.auth_manager = fake_auth
+    app.current_tenant_id = "t-aaa"
+    app._update_tenant_list()
+    check("multi-tenant: dropdown = libellés uniques",
+          list(app.tenant_combo["values"]) == ["u@t-aaa", "u@t-bbb"],
+          str(app.tenant_combo["values"]))
+    app.tenant_var.set("u@t-bbb")
+    app._on_tenant_selected(None)
+    check("multi-tenant: bascule vers le 2e tenant",
+          app.current_tenant_id == "t-bbb", str(app.current_tenant_id))
+    ttree.destroy()
+
+    # ---- 5c. Instanciation des dialogues (régression __initaks__ v2.0) ----
     # Le bug v2.0 (super().__initasks__ dans UnlicensedUsersDialog) n'était
     # pas détecté car aucun test n'instanciait les dialogues. On construit
     # maintenant chaque dialogue critique headless.

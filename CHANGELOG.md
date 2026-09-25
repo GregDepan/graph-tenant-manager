@@ -1,5 +1,32 @@
 # Changelog — Graph Tenant Manager
 
+## v2.1.5 (25/09/2026) — Bascule multi-tenant + tri/filtre intelligents
+
+### 🔀 Fix bascule entre tenants connectés
+- Cause : le dropdown recevait les GUID bruts ET forçait la sélection
+  sur le premier tenant (`current(0)`) à chaque mise à jour — impossible
+  de basculer vers le 2e client.
+- Le dropdown affiche maintenant des **libellés lisibles** (nom du
+  tenant > username > GUID), résolution fiable libellé→GUID via une
+  map interne (gère même les doublons de noms).
+- La reconnexion silencieuse au démarrage propose **tous** les tenants
+  sauvegardés (avant : seul le premier était reconnecté).
+
+### 🔍 Tri + filtre intelligents sur TOUS les tableaux (9 onglets)
+- **Tri au clic sur l'en-tête** (re-clic = ordre inverse, flèche ▲/▼) :
+  - nombres **avec unités** — « 500 ko » < « 980 Mo » < « 1,5 Go » < « 24 Go »
+  - dates françaises (jj/mm/aaaa)
+  - texte insensible à la casse et aux accents
+  - détection automatique du type par colonne, cellules vides en fin
+- **Filtre instantané** : champ de recherche au-dessus de chaque tableau,
+  multi-termes (espaces = ET logique), insensible accents/casse,
+  appliqué sur toutes les colonnes ; compteur « X / Y lignes » pendant
+  le filtrage ; Échap pour effacer.
+- Ré-application automatique du filtre/tri après un rechargement
+  (Actualiser), sélection préservée.
+- Implémentation : `gui/table_utils.py` (`TableEnhancer`), branché
+  dans `_make_tree` — tous les onglets en profitent automatiquement.
+
 ## v2.1.4 (25/09/2026) — Licences visibles + noms corrects
 
 ### 🐛 Fix CRITIQUE : « ✖ Aucune » pour tous les utilisateurs
