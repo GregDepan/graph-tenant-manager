@@ -505,11 +505,10 @@ async def run_tests_async():
     check("updater: APP_VERSION définie", APP_VERSION == "2.1.1")
     check("updater: parse_version v2.1.0", parse_version("v2.1.0") == (2, 1, 0))
     check("updater: parse_version robuste", parse_version("v10.2.3-beta") == (10, 2, 3))
-    check("updater: comparaison stricte",
+    check("updater: comparaison stricte (relative à la version locale)",
           updater.compare_versions("v99.0.0")[0] is True and
-          updater.compare_versions("v2.1.0")[0] is False and
-          updater.compare_versions("v2.0.9")[0] is False and
-          updater.compare_versions("v2.1.1")[0] is True)
+          updater.compare_versions(APP_VERSION)[0] is False and
+          updater.compare_versions("v2.0.9")[0] is False)
     check("updater: padding implicite (2,1) < (2,1,0)",
           updater.compare_versions("v2.1")[0] is False)
 
