@@ -502,7 +502,7 @@ async def run_tests_async():
     from core.app_info import APP_VERSION, parse_version
     from core import updater
 
-    check("updater: APP_VERSION définie", APP_VERSION == "2.1.0")
+    check("updater: APP_VERSION définie", APP_VERSION == "2.1.1")
     check("updater: parse_version v2.1.0", parse_version("v2.1.0") == (2, 1, 0))
     check("updater: parse_version robuste", parse_version("v10.2.3-beta") == (10, 2, 3))
     check("updater: comparaison stricte",

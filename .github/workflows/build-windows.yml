@@ -9,6 +9,11 @@ on:
 jobs:
   build:
     runs-on: windows-latest
+    # Nécessaire pour que softprops/action-gh-release puisse créer la
+    # release avec le .exe (sinon 403 "Resource not accessible by
+    # integration").
+    permissions:
+      contents: write
     steps:
       - name: Checkout
         uses: actions/checkout@v4
