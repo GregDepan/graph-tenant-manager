@@ -1,5 +1,9 @@
 # Plan de Développement : Gestionnaire Multi-Tenants Microsoft Graph
 
+> ⚠️ **Document historique** (conception initiale, avant v1.0). L'état
+> réel du projet est décrit dans `README.md` et `CHANGELOG.md` — ce plan
+> est conservé comme référence d'architecture. Ne pas suivre tel quel.
+
 ## 📊 Synthèse des Fonctionnalités Microsoft Graph
 
 ### **Microsoft Graph PowerShell SDK**

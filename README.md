@@ -3,7 +3,7 @@
 Outil **clé en main** de gestion multi-tenants Microsoft 365 pour MSP/administrateurs.
 Un .exe, un bouton « Connecter », le compte admin du client — c'est tout.
 
-**v2.0** — voir `CHANGELOG.md`.
+**v2.1.4** — voir `CHANGELOG.md`.
 
 ---
 
@@ -34,8 +34,17 @@ module PowerShell officiel. **Aucune installation**, aucun Python requis.
 | 📧 **Exchange** | Utilisation des boîtes (taille, éléments, dernière activité — D30), export CSV |
 | 💬 **Teams** | Inventaire des équipes (tout le tenant), canaux, effectifs, export CSV |
 
+- **Licences par utilisateur (v2.1.3+)** : la colonne « Licences » de
+  l'onglet Utilisateurs affiche les **noms réels** des licences assignées
+  (ex. « Microsoft 365 Business Standard »), traduits depuis les GUID via
+  l'inventaire `subscribedSkus`. Nommage conforme au renommage Microsoft
+  d'avril 2020 (`O365_BUSINESS_PREMIUM` = Business Standard).
 - **Multi-tenant** : bascule entre clients en un clic, reconnexion silencieuse
   au démarrage (cache de tokens chiffré par Windows — zéro mot de passe stocké).
+- **Connexion résiliente (v2.1.3+)** : si le client n'a pas encore consenti
+  les nouveaux scopes workloads, la connexion réussit quand même en
+  « permissions réduites » (onglets SharePoint/OneDrive/Exchange/Teams
+  indisponibles, message explicite) — plus jamais d'échec total.
 - **Mises à jour automatiques** : au lancement, l'app vérifie les releases
   GitHub en arrière-plan ; si une nouvelle version existe, une notification
   propose la mise à jour — téléchargement avec progression, remplacement du
@@ -52,12 +61,12 @@ graph-tenant-manager/
 ├── LANCER.bat               Lancement sans compilation (installe Python si besoin)
 ├── CLIENT.md                Guide client 1 page
 ├── requirements.txt
-├── test_integration.py      79 vérifications
+├── test_integration.py      153 vérifications
 ├── .github/workflows/       Build .exe automatique (GitHub Actions)
 ├── assets/icon.ico          Icône
-├── core/                    auth (well-known, silent reconnect), graph_client, async_runner
-├── services/                users, groups, devices, licenses
-└── gui/                     main_window (5 onglets), dialogs (9 dialogues)
+├── core/                    auth (well-known, silent reconnect), graph_client, async_runner, updater
+├── services/                users, groups, devices, licenses, sharepoint, onedrive, exchange, teams
+└── gui/                     main_window (9 onglets), dialogs, workload_panels
 ```
 
 ## 🔨 Build du .exe
@@ -76,14 +85,16 @@ pyinstaller --onefile --windowed --icon assets/icon.ico --add-data "assets;asset
 
 ```cmd
 python test_integration.py
-:: 79 vérifications : compilation, imports, AsyncRunner sync+async,
-:: auth zéro-config, services mockés, GUI headless
+:: 153 vérifications : compilation, imports, AsyncRunner sync+async,
+:: auth zéro-config + repli consentement, services mockés (vrai modèle
+:: SDK LicenseUnitsDetail), $select users, nommage licences, GUI headless
 ```
 
 ## ⚠️ Limites connues
 
 - 1re connexion : consentement admin exigé par Microsoft (une case, une fois
-  par client — aucune app n'y échappe).
+  par client — aucune app n'y échappe). Sans lui pour les scopes workloads,
+  la connexion passe en « permissions réduites » (v2.1.3+).
 - Authentification delegated (compte admin) — pas de mode daemon/app-only.
 - Listes = pagination complète : très bon jusqu'à quelques milliers d'objets.
 - .exe non signé → SmartScreen la 1re fois (cert code signing ~200 €/an).

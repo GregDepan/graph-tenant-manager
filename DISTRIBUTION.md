@@ -1,337 +1,77 @@
-# 📦 Guide de Distribution - Graph Tenant Manager
+# 📦 Guide de Distribution — Graph Tenant Manager
 
-## 🎯 Objectif
-Ce guide explique comment distribuer Graph Tenant Manager à vos clients ou collègues.
+## Vue d'ensemble (v2.0+)
 
----
+Depuis la v2.0, la distribution est **clé en main** :
+- **Aucune app à créer dans Entra ID** — l'outil utilise l'application
+  publique multi-tenant de Microsoft (« Microsoft Graph PowerShell »).
+- **Aucun config.cfg à éditer** — le tenant est déduit automatiquement du
+  compte qui se connecte. (config.cfg reste possible pour surcharger
+  clientId/scopes, mais ce n'est plus nécessaire.)
+- **Le .exe se met à jour tout seul** (v2.1+) : plus besoin de redéployer
+  chez les clients à chaque version — ils reçoivent une notification au
+  lancement et l'outil se met à jour (téléchargement + relance auto).
 
-## 📋 Deux Options de Distribution
+## Méthode de distribution recommandée
 
-### Option A: Exécutable Autonome (Recommandé)
+1. **Envoyez simplement le lien de téléchargement** :
+   https://github.com/GregDepan/graph-tenant-manager/releases
+   (le repo est public — le lien marche pour tout le monde)
 
-**Avantages:**
-- ✅ Aucune installation Python requise
-- ✅ Fichier .exe unique
-- ✅ Prêt à l'emploi
-- ✅ Idéal pour clients non-techniques
-
-**Inconvénients:**
-- ⚠️ Fichier plus gros (~50-100 MB)
-- ⚠️ Nécessite de compiler sur une machine Windows
-
-#### Étapes:
-
-1. **Compiler l'application**
-   ```cmd
-   cd graph-tenant-manager
-   build.bat
+2. **Ou envoyez un package minimal par email/USB** :
+   ```
+   GraphTenantManager-package/
+   ├── GraphTenantManager.exe    # L'application (release GitHub)
+   └── CLIENT.md                 # Guide client 1 page
    ```
 
-2. **Récupérer les fichiers**
-   - Dossier: `dist/`
-   - Fichier principal: `GraphTenantManager.exe`
-   - Script: `lancer.bat`
-   - Config: `config.cfg` (à éditer)
+3. **Instructions à donner au client** (elles sont dans CLIENT.md) :
+   - Double-clic sur l'exe → SmartScreen → « Exécuter quand même »
+   - Bouton **Connecter** → compte admin → cocher « Consentement au nom
+     de votre organisation » à la 1re connexion
+   - C'est tout. Les mises à jour arrivent ensuite automatiquement.
 
-3. **Préparer le package**
-   ```
-   Graph-Tenant-Manager-Client/
-   ├── GraphTenantManager.exe    # Application
-   ├── lancer.bat                 # Lanceur
-   ├── config.cfg                 # Configuration (avec Client ID du client)
-   └── README-CLIENT.md           # Guide utilisateur simplifié
-   ```
+## Cas particuliers
 
-4. **Configurer pour le client**
-   - Éditez `config.cfg` avec le Client ID Azure DU CLIENT
-   - OU: laissez le client le faire (voir section "Configuration Client")
+### Client sans navigateur (RDP / serveur)
+Rien à faire : à l'échec d'ouverture du navigateur, l'outil bascule
+automatiquement en « device code » (code à saisir sur
+microsoft.com/devicelogin depuis n'importe quel appareil).
 
-5. **Distribuer**
-   - ZIPpez le dossier
-   - Envoyez par email/WeTransfer/Teams
-   - OU: copiez sur clé USB
+### Client qui refuse le consentement des nouveaux scopes (v2.1+)
+L'outil se connecte quand même en « permissions réduites » : les onglets
+Utilisateurs/Groupes/Appareils/Licences fonctionnent, seuls les onglets
+SharePoint/OneDrive/Exchange/Teams restent bloqués jusqu'au consentement.
+Le client peut l'accorder plus tard en se reconnectant et en cochant
+« Consentement au nom de votre organisation ».
 
----
+### Multi-clients sur le même poste (usage MSP)
+Connectez les clients l'un après l'autre (bouton Connecter), puis
+basculez via le sélecteur de tenant en haut à droite. Au démarrage
+suivant, l'outil propose la reconnexion silencieuse de chacun (cache de
+tokens chiffré par Windows, zéro mot de passe stocké).
 
-### Option B: Scripts Python (Développement)
+## Build manuel (optionnel)
 
-**Avantages:**
-- ✅ Plus léger
-- ✅ Facile à modifier
-- ✅ Code source accessible
+Le build est automatique via GitHub Actions à chaque push ; un tag `v*`
+crée une release publique. Pour compiler manuellement :
 
-**Inconvénients:**
-- ⚠️ Nécessite Python installé
-- ⚠️ Plus complexe pour l'utilisateur final
-
-#### Étapes:
-
-1. **Préparer le dossier complet**
-   ```
-   graph-tenant-manager/
-   ├── main.py
-   ├── config.cfg.example
-   ├── requirements.txt
-   ├── install.bat
-   ├── start.bat
-   ├── core/
-   ├── gui/
-   ├── services/
-   ├── utils/
-   └── README.md
-   ```
-
-2. **Supprimer les dossiers inutiles**
-   - `build/` (si existe)
-   - `dist/` (si existe)
-   - `logs/` (sera recréé)
-   - `venv/` (sera recréé)
-
-3. **Distribuer**
-   - ZIPpez le dossier
-   - Le client exécute `install.bat`
-
----
-
-## 🔐 Configuration Client
-
-### Méthode 1: Vous Configurez (Recommandé)
-
-1. **Récupérez le Client ID du client**
-   - Demandez au client de vous envoyer:
-     - Application (client) ID
-     - (Optionnel) Tenant ID
-
-2. **Éditez config.cfg**
-   ```ini
-   [azure]
-   clientId = a1b2c3d4-e5f6-7890-abcd-ef1234567890
-   tenantId = common
-   ```
-
-3. **Distribuez avec le fichier déjà configuré**
-
-### Méthode 2: Le Client Configure
-
-1. **Fournissez le fichier `config.cfg.example`**
-
-2. **Envoyez les instructions:**
-   ```
-   1. Renommez config.cfg.example en config.cfg
-   2. Ouvrez config.cfg avec le Bloc-notes
-   3. Remplacez VOTRE_CLIENT_ID_ICI par votre Client ID Azure
-   4. Sauvegardez
-   ```
-
-3. **Fournissez le guide de configuration Azure**
-   - Voir section "Configuration Azure" dans README.md
-   - OU: envoyez QUICKSTART.md
-
----
-
-## 📧 Email Type pour Distribution
-
-### Objet: Graph Tenant Manager - Application de Gestion Microsoft 365
-
-```
-Bonjour [Client],
-
-Voici l'application Graph Tenant Manager pour gérer votre environnement Microsoft 365.
-
-📦 PIÈCE JOINTE: Graph-Tenant-Manager.zip
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-🚀 INSTALLATION RAPIDE:
-
-1. Dézippez le dossier sur votre bureau
-2. Double-cliquez sur "install.bat"
-3. Attendez la fin de l'installation
-4. Lancez "start.bat"
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-⚙️ CONFIGURATION OBLIGATOIRE:
-
-Avant la première utilisation, vous devez configurer 
-l'application avec votre compte Azure:
-
-1. Lisez le fichier QUICKSTART.md (guide étape par étape)
-2. Créez une application dans le portail Azure
-3. Copiez le Client ID dans config.cfg
-
-Temps estimé: 10 minutes
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-📖 DOCUMENTATION:
-
-- README.md: Documentation complète
-- QUICKSTART.md: Guide de démarrage rapide
-- Aide en ligne: Menu "Aide" dans l'application
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-❓ BESOIN D'AIDE?
-
-Si vous rencontrez des problèmes:
-- Vérifiez les logs dans le dossier "logs"
-- Répondez à cet email avec les erreurs
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-Cordialement,
-[Votre Nom]
+```cmd
+pip install pyinstaller
+pyinstaller --onefile --windowed --icon assets/icon.ico --add-data "assets;assets" --name GraphTenantManager main.py
 ```
 
----
+## Versioning
 
-## 🎨 Personnalisation (Optionnel)
+Format sémantique `vX.Y.Z` :
+- **Majeure** : refonte/breaking
+- **Mineure** : nouvelles fonctionnalités (onglets, scopes…)
+- **Patch** : corrections de bugs
 
-### Changer le Nom de l'Application
-
-1. **Éditez `build.bat`**
-   ```batch
-   --name "VotreNomApplication"
-   ```
-
-2. **Éditez `main.py`**
-   ```python
-   root.title("Votre Nom d'Application")
-   ```
-
-3. **Re-compilez**
-   ```cmd
-   build.bat
-   ```
-
-### Ajouter un Logo/Icone
-
-1. **Préparez un fichier .ico**
-   - Taille: 256x256 pixels
-   - Format: Windows Icon (.ico)
-
-2. **Éditez `build.bat`**
-   ```batch
-   --icon=votre-logo.ico
-   ```
-
-3. **Re-compilez**
-
-### Personnaliser les Couleurs
-
-1. **Éditez `gui/main_window.py`**
-   - Cherchez `_setup_styles()`
-   - Modifiez les couleurs
-
-2. **Exemple:**
-   ```python
-   style.configure('Title.TLabel', 
-       font=('Segoe UI', 16, 'bold'),
-       foreground='#0078D4')  # Bleu Microsoft
-   ```
+À chaque release : bump de `APP_VERSION` dans `core/app_info.py`,
+tag `vX.Y.Z` → GitHub Actions construit et publie la release
+automatiquement. L'historique détaillé est dans `CHANGELOG.md`.
 
 ---
 
-## 📊 Suivi des Versions
-
-### Versioning
-
-Utilisez un système de version sémantique:
-- **v1.0.0**: Version initiale
-- **v1.1.0**: Nouvelles fonctionnalités
-- **v1.0.1**: Correction de bugs
-
-### Journal des Modifications
-
-Créez un fichier `CHANGELOG.md` pour chaque client:
-```markdown
-# Changelog - Client [Nom]
-
-## v1.0.0 - 2026-01-15
-- Installation initiale
-- Configuration avec Client ID: xxxxxxxx
-- Premier déploiement
-```
-
----
-
-## 🔒 Sécurité & Bonnes Pratiques
-
-### À FAIRE:
-- ✅ Utilisez des Client IDs uniques par client
-- ✅ Ne partagez jamais les fichiers de config entre clients
-- ✅ Révoquez les accès si l'application n'est plus utilisée
-- ✅ Gardez une copie des configurations clients
-
-### À NE PAS FAIRE:
-- ❌ N'utilisez PAS le même Client ID pour tous les clients
-- ❌ Ne commitez PAS config.cfg dans Git
-- ❌ Ne distribuez PAS avec des permissions excessives
-- ❌ N'envoyez PAS les identifiants par email non-sécurisé
-
----
-
-## 📞 Support Client
-
-### Questions Fréquentes
-
-**Q: L'application ne se lance pas**
-→ Vérifiez que Python est installé (Option B) ou que le .exe n'est pas bloqué par l'antivirus
-
-**Q: Erreur de connexion**
-→ Vérifiez que le Client ID est correct et que les permissions Azure sont accordées
-
-**Q: Comment ajouter un nouveau tenant?**
-→ Cliquez sur "🔐 Connecter" dans l'application
-
-**Q: Puis-je utiliser l'application sur plusieurs PC?**
-→ Oui, copiez simplement le dossier `dist` complet
-
-### Checklist de Dépannage
-
-- [ ] Python installé (Option B)?
-- [ ] Client ID correct dans config.cfg?
-- [ ] Permissions Azure accordées?
-- [ ] "Allow public client flows" activé?
-- [ ] Firewall/Antivirus ne bloque pas l'application?
-
----
-
-## 📈 Améliorations Futures
-
-### Fonctionnalités Demandées par les Clients
-
-- [ ] Export PDF des rapports
-- [ ] Notifications email automatiques
-- [ ] Synchronisation planning
-- [ ] Interface web
-- [ ] API REST
-
-### Recueillir les Feedbacks
-
-Après 1 semaine d'utilisation:
-1. Envoyez un email de suivi
-2. Demandez:
-   - Qu'est-ce qui fonctionne bien?
-   - Quels problèmes rencontrés?
-   - Quelles fonctionnalités manquantes?
-3. Notez les feedbacks pour la v2.0
-
----
-
-## 🎯 Résumé
-
-**Pour distribuer rapidement:**
-
-1. Compilez: `build.bat`
-2. Configurez: Éditez `config.cfg` avec le Client ID du client
-3. Packagez: ZIPpez le dossier `dist`
-4. Envoyez: Email avec pièce jointe + instructions
-5. Suivez: Email de feedback après 1 semaine
-
-**Temps total**: ~15 minutes par client ⚡
-
----
-
-**Bon déploiement! 🚀**
+*Graph Tenant Manager v2.1.4*

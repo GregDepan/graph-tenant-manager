@@ -22,6 +22,21 @@
 | 👥 Groupes | Créer, gérer les membres, supprimer, exporter |
 | 📱 Appareils | Inventaire des appareils, conformité, export |
 | 🔑 Licences | Stock de licences, alertes de stock bas, utilisateurs sans licence, export |
+| 🗂️ SharePoint | Inventaire des sites, bibliothèques documentaires (stockage), export |
+| ☁️ OneDrive | Espace disque par utilisateur (alerte si moins de 5 Go restants), export |
+| 📧 Exchange | Utilisation des boîtes mail (taille, dernière activité — 30 jours), export |
+| 💬 Teams | Inventaire des équipes, canaux, effectifs, export |
+
+**Mises à jour automatiques** : au lancement, l'outil vérifie s'il existe
+une nouvelle version ; si oui, une notification propose la mise à jour
+(téléchargement + installation + relance automatiques). Vous pouvez aussi
+utiliser Aide → « Vérifier les mises à jour ».
+
+**Onglets SharePoint / OneDrive / Exchange / Teams indisponibles ?** Votre
+administrateur n'a pas encore accepté les nouvelles autorisations
+Microsoft correspondantes. L'outil fonctionne alors en « permissions
+réduites » : tous les autres onglets marchent normalement. Reconnectez-vous
+en cochant « Consentement au nom de votre organisation » pour les activer.
 
 **Plusieurs clients ?** Connectez-vous avec le compte admin du client A,
 puis cliquez 🔐 Connecter à nouveau avec le compte du client B : le menu
