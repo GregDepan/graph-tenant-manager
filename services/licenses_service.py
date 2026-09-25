@@ -106,24 +106,32 @@ def _sku_display_name(part_number: Optional[str]) -> str:
 
 def _total_enabled_units(prepaid_units: Any) -> int:
     """
-    Calcule le total d'unités achetées (somme des unités activées).
+    Calcule le total d'unités achetées du SKU.
+
+    Dans le SDK Graph, `subscribedSku.prepaidUnits` est un OBJET UNIQUE
+    LicenseUnitsDetail (champ `enabled`), PAS une liste — l'itération
+    provoquait un TypeError avec de vraies données Microsoft (v1.1-v2.1).
 
     Args:
-        prepaid_units: Liste d'objets SDK (champ enabled) ou None
+        prepaid_units: objet LicenseUnitsDetail (ou None/mock ancien
+            format liste, toléré pour compatibilité)
 
     Returns:
-        Somme des quantités activées (0 si vide/invalide)
+        Nombre d'unités activées (0 si vide/invalide)
     """
     if not prepaid_units:
         return 0
-    total = 0
-    for unit in prepaid_units:
+    # Format SDK actuel : objet unique avec champ enabled
+    if hasattr(prepaid_units, "enabled"):
         try:
-            enabled = int(getattr(unit, "enabled", 0) or 0)
+            return int(getattr(prepaid_units, "enabled", 0) or 0)
         except (TypeError, ValueError):
-            enabled = 0
-        total += enabled
-    return total
+            return 0
+    # Tolérance ancien format (séquence d'objets) — mocks v1.x
+    try:
+        return sum(int(getattr(u, "enabled", 0) or 0) for u in prepaid_units)
+    except (TypeError, ValueError):
+        return 0
 
 
 def _compute_warning(total: int, consumed: int, available: int) -> bool:

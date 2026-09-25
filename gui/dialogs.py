@@ -481,7 +481,7 @@ class AssignLicenseDialog(BaseDialog):
         self.sku_tree.column("#0", width=240, stretch=True)
         self.sku_tree.column("name", width=140, anchor=tk.W)
         self.sku_tree.heading("status", text="Statut")
-        self.ssku_tree_col = self.sku_tree.column("status", width=110, anchor=tk.W)
+        self.sku_tree.column("status", width=110, anchor=tk.W)
 
         scroll = ttk.Scrollbar(list_frame, orient=tk.VERTICAL, command=self.sku_tree.yview)
         self.sku_tree.configure(yscrollcommand=scroll.set)
@@ -537,6 +537,10 @@ class UserDetailDialog(BaseDialog):
     def __init__(self, parent: tk.Misc, user: Dict[str, Any]):
         self.user = user
         super().__init__(parent, "👤 Détails de l'utilisateur", width=560)
+        # BaseDialog crée les boutons APRÈS _build_ui : lecture seule →
+        # un seul bouton Fermer
+        self.ok_btn.config(text="Fermer", command=self.destroy)
+        self.cancel_btn.pack_forget()
 
     def _build_ui(self, parent: ttk.Frame):
         form = self._make_form(parent)
@@ -581,10 +585,6 @@ class UserDetailDialog(BaseDialog):
             copy_frame, text="📋 Copier l'UPN",
             command=lambda: self._copy_to_clipboard(self.user.get("user_principal_name", ""))
         ).pack(side=tk.LEFT)
-
-        # Remplacer le bouton Valider par un simple bouton Fermer
-        self.ok_btn and None
-        self.cancel_btn and None
 
     def _build_result(self) -> Any:
         return None
@@ -715,6 +715,9 @@ class MembersDialog(BaseDialog):
         self.on_remove_member = on_remove_member
         super().__init__(parent, f"👥 Membres — {group_name}", width=640)
         self.geometry(f"{640}x{520}")
+        # BaseDialog crée les boutons APRÈS _build_ui : personnalisation ici
+        self.ok_btn.pack_forget()
+        self.cancel_btn.config(text="Fermer")
 
     def _build_ui(self, parent: ttk.Frame):
         main = ttk.Frame(parent)
@@ -754,10 +757,6 @@ class MembersDialog(BaseDialog):
         # Bandeau de statut local au dialogue
         self.status_label = ttk.Label(main, text="", foreground="gray")
         self.status_label.pack(fill=tk.X, pady=(8, 0))
-
-        # Cacher les boutons Annuler/Valider standard
-        self.ok_btn.pack_forget()
-        self.cancel_btn.config(text="Fermer")
 
     def _render_members(self):
         for item in self.members_tree.get_children():
@@ -859,9 +858,13 @@ class _MemberPickDialog(BaseDialog):
         self.current_members = current_members or []
         self.on_ok = on_ok
         self.load_users = load_users
-        self.candidates: List[Dict[str, AsyncRunner_result_placeholder]] = []
+        self.candidates: List[Dict[str, Any]] = []
         super().__init__(parent, "➕ Ajouter un membre", width=580)
         self.geometry(f"{580}x{480}")
+        # BaseDialog crée ok_btn/cancel_btn APRÈS _build_ui : on
+        # personnalise les libellés ici.
+        self.ok_btn.config(text="Ajouter")
+        self.cancel_btn.config(text="Annuler")
 
     def _build_ui(self, parent: ttk.Frame):
         main = ttk.Frame(parent)
@@ -870,7 +873,6 @@ class _MemberPickDialog(BaseDialog):
         ttk.Label(main, text="Sélectionnez l'utilisateur à ajouter :", style="Subtitle.TLabel").pack(anchor=tk.W, pady=(0, 8))
 
         tree_frame = ttk.Frame(main)
-        tree_frame.pack(fill=tk.BOKH, expand=True)
         tree_frame.pack(fill=tk.BOTH, expand=True)
 
         self.users_tree = ttk.Treeview(
@@ -879,7 +881,6 @@ class _MemberPickDialog(BaseDialog):
         self.users_tree.heading("#0", text="Nom")
         self.users_tree.column("#0", width=200, stretch=True)
         self.users_tree.heading("email", text="Email")
-        self.users_users_tree_col = None
         self.users_tree.column("email", width=200, anchor=tk.W)
         self.users_tree.heading("type", text="Type")
         self.users_tree.column("type", width=90, anchor=tk.W)
@@ -892,9 +893,6 @@ class _MemberPickDialog(BaseDialog):
         # Statut
         self.status_label = ttk.Label(main, text="Chargement des utilisateurs...", foreground="gray")
         self.status_label.pack(fill=tk.X, pady=(8, 0))
-
-        self.ok_btn.config(text="Ajouter")
-        self.cancel_btn.config(text="Annuler")
 
         # Chargement des utilisateurs (blocant local, léger : cache de la fenêtre principale)
         if self.load_users:

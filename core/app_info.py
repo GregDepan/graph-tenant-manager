@@ -6,7 +6,7 @@ de mises à jour (core/updater.py) s'appuie dessus.
 """
 
 # Version courante de l'application (affichée et comparée aux tags GitHub)
-APP_VERSION = "2.1.1"
+APP_VERSION = "2.1.2"
 
 # Dépôt GitHub des releases (public — pas d'authentification requise)
 REPO_OWNER = "GregDepan"

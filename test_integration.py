@@ -233,7 +233,10 @@ class FakeSku:
         self.sku_id = f"sku-{part}"
         self.sku_part_number = part
         self.consumed_units = consumed
-        self.prepaid_units = [types.SimpleNamespace(enabled=total)]
+        # VRAI format SDK : prepaidUnits est un OBJET LicenseUnitsDetail
+        # (champ enabled), PAS une liste. Régression v2.1.2 : l'itération
+        # d'un objet non-itérable crachait l'onglet Licences en prod.
+        self.prepaid_units = types.SimpleNamespace(enabled=total)
 
 
 # ---- Fakes workloads v2.1 -------------------------------------------
@@ -418,6 +421,18 @@ async def run_tests_async():
     ls = LicensesService(fw)
     inv = await ls.get_inventory()
     check("licences: 2 SKUs", len(inv) == 2)
+    # Régression v2.1.2 : le VRAI objet SDK LicenseUnitsDetail (non
+    # itérable) doit être lu sans crash — c'est le bug qui crachait
+    # l'onglet Licences avec de vraies données Microsoft.
+    from msgraph.generated.models.license_units_detail import LicenseUnitsDetail
+    from services.licenses_service import _total_enabled_units as _teu
+    check("licences: LicenseUnitsDetail réel lu (fix TypeError)",
+          _teu(LicenseUnitsDetail(enabled=25)) == 25 and
+          _teu(LicenseUnitsDetail(enabled=None)) == 0 and
+          _teu(None) == 0)
+    check("licences: compat ancien format liste (mocks)",
+          _teu([types.SimpleNamespace(enabled=10),
+                types.SimpleNamespace(enabled=5)]) == 15)
     spe = [i for i in inv if i["part_number"] == "SPE_E3"][0]
     check("licences: total/consumed/available", spe["total"] == 25 and spe["consumed"] == 24 and spe["available"] == 1)
     check("licences: warning déclenché (1 dispo)", spe["warning"] is True)
@@ -502,7 +517,7 @@ async def run_tests_async():
     from core.app_info import APP_VERSION, parse_version
     from core import updater
 
-    check("updater: APP_VERSION définie", APP_VERSION == "2.1.1")
+    check("updater: APP_VERSION définie", APP_VERSION == "2.1.2")
     check("updater: parse_version v2.1.0", parse_version("v2.1.0") == (2, 1, 0))
     check("updater: parse_version robuste", parse_version("v10.2.3-beta") == (10, 2, 3))
     check("updater: comparaison stricte (relative à la version locale)",
@@ -666,6 +681,14 @@ if tk:
                                      "available": 5}], current_skus=[])
     check("gui: AssignLicenseDialog instancié", d2 is not None)
     d2.destroy()
+    # v2.1.2 : dialogue d'ajout de membre (corruptions BOKH/annotation)
+    from gui.dialogs import _MemberPickDialog
+    d3 = _MemberPickDialog(root, current_members=[{"id": "u0"}],
+                           load_users=lambda: [{"id": "u1", "display_name": "B",
+                                                "email": "b@c.com", "type": "Utilisateur"}])
+    check("gui: _MemberPickDialog instancié (fix BOKH)", d3 is not None and
+          len(d3.users_tree.get_children()) == 1)
+    d3.destroy()
 
     root.destroy()
     _upd.fetch_latest_release = _orig_fetch  # restaure le vrai fetcher
