@@ -39,6 +39,9 @@ from gui.dialogs import (
 
 APP_TITLE = "🏢 Graph Tenant Manager"
 
+# v2.1 : version applicative (affichée + comparée aux releases GitHub)
+from core.app_info import APP_VERSION as APP_VERSION_LOCAL  # noqa: E402
+
 
 class GraphTenantManagerApp:
     """Application principale de gestion multi-tenants Microsoft Graph."""
@@ -72,6 +75,8 @@ class GraphTenantManagerApp:
         self.root.title(APP_TITLE)
         self.root.geometry("1280x800")
         self.root.minsize(1080, 700)
+        # v2.1 : version affichée dans la barre de titre
+        self.root.title(f"{APP_TITLE} — v{APP_VERSION_LOCAL}")
 
         self._setup_styles()
         self._create_menu()
@@ -81,7 +86,112 @@ class GraphTenantManagerApp:
         self._show_welcome()
         # v2.0 : propose la reconnexion silencieuse aux tenants déjà autorisés
         self.root.after(300, self._try_silent_reconnect)
+        # v2.1 : vérification non bloquante des mises à jour GitHub
+        self.root.after(800, self._check_for_updates)
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
+
+    # ------------------------------------------------------------------
+    # MISES À JOUR AUTOMATIQUES (v2.1)
+    # ------------------------------------------------------------------
+
+    def _check_for_updates(self):
+        """Interroge GitHub en arrière-plan ; propose la mise à jour le cas échéant."""
+        import core.updater as updater
+
+        def check():
+            return updater.check_update()
+
+        def on_result(info):
+            if not info:
+                return  # à jour, ou GitHub injoignable : silence
+            self.root.after(0, lambda: self._offer_update(info))
+
+        def on_error(_):
+            pass  # jamais bloquant : on ignore silencieusement
+
+        self.runner.run_in_thread(check, callback=on_result, error_callback=on_error)
+
+    def _offer_update(self, info):
+        """Affiche la notification de mise à jour disponible."""
+        from tkinter import messagebox
+        size_mo = info.get("size", 0) / (1024 * 1024)
+        msg = (
+            f"Une nouvelle version est disponible !\n\n"
+            f"Version actuelle : {APP_VERSION_LOCAL}\n"
+            f"Nouvelle version : v{info['version']}\n"
+            f"Taille : {size_mo:.1f} Mo\n\n"
+            f"Mettre à jour maintenant ?\n"
+            f"(L'application redémarrera automatiquement)"
+        )
+        answer = messagebox.askyesno(
+            "🔄 Mise à jour disponible", msg, icon="question", parent=self.root)
+        if answer:
+            self._apply_update(info)
+
+    def _apply_update(self, info):
+        """Télécharge et applique la mise à jour, avec barre de progression."""
+        import core.updater as updater
+
+        # Fenêtre de progression
+        win = tk.Toplevel(self.root)
+        win.title("Mise à jour en cours")
+        win.geometry("380x120")
+        win.resizable(False, False)
+        win.transient(self.root)
+        ttk.Label(win, text=f"Téléchargement v{info['version']}...",
+                  padding=(15, 10)).pack()
+        bar = ttk.Progressbar(win, length=340, mode="determinate", maximum=100)
+        bar.pack(padx=15)
+        pct_label = ttk.Label(win, text="0 %", padding=(15, 5))
+        pct_label.pack()
+        win.grab_set()
+
+        def on_progress(received, total):
+            def apply():
+                pct = int(received * 100 / total)
+                bar["value"] = pct
+                pct_label.config(text=f"{pct} %")
+            self.root.after(0, apply)
+
+        def do_download():
+            return updater.download_update(info["url"], progress_cb=on_progress)
+
+        def on_done(path):
+            def apply():
+                if not path:
+                    messagebox.showerror(
+                        "Mise à jour",
+                        "Le téléchargement a échoué.\n"
+                        "Réessayez plus tard ou téléchargez manuellement\n"
+                        "depuis https://github.com/GregDepan/graph-tenant-manager/releases",
+                        parent=self.root)
+                    win.destroy()
+                    return
+                # Application + relance : si ça échoue, l'ancienne
+                # version continue de fonctionner.
+                if updater.apply_update(path):
+                    # apply_update relance le nouvel exe et exit() :
+                    # cette ligne ne s'exécute que si sys.exit a été
+                    # contourné
+                    pass
+                else:
+                    messagebox.showerror(
+                        "Mise à jour",
+                        "L'application de la mise à jour a échoué.",
+                        parent=self.root)
+                    win.destroy()
+            self.root.after(0, apply)
+
+        def on_error(exc):
+            def apply():
+                messagebox.showerror(
+                    "Mise à jour", f"Téléchargement impossible : {exc}",
+                    parent=self.root)
+                win.destroy()
+            self.root.after(0, apply)
+
+        self.runner.run_in_thread(do_download, callback=on_done,
+                                  error_callback=on_error)
 
     def _setup_styles(self):
         style = ttk.Style()
@@ -121,6 +231,9 @@ class GraphTenantManagerApp:
         help_menu = tk.Menu(menubar, tearoff=0)
         menubar.add_cascade(label="Aide", menu=help_menu)
         help_menu.add_command(label="Documentation", command=self._show_help)
+        help_menu.add_separator()
+        help_menu.add_command(label="🔄 Vérifier les mises à jour",
+                              command=self._check_for_updates)
         help_menu.add_command(label="À propos", command=self._show_about)
 
     def _create_main_layout(self):

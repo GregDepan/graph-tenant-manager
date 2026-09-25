@@ -36,6 +36,7 @@ print("=" * 60)
 print("\n[1] Compilation de tous les modules")
 import py_compile
 for mod in ["main.py", "core/async_runner.py", "core/auth.py", "core/graph_client.py",
+            "core/app_info.py", "core/updater.py",
             "services/users_service.py", "services/groups_service.py",
             "services/devices_service.py", "services/licenses_service.py",
             "services/sharepoint_service.py", "services/onedrive_service.py",
@@ -497,6 +498,72 @@ async def run_tests_async():
     ok = ts.export_to_csv(teams, tmp6)
     check("teams: export CSV", ok and "Oui" in open(tmp6, encoding="utf-8").read())
 
+    # ---- Mises à jour automatiques (v2.1) ----
+    from core.app_info import APP_VERSION, parse_version
+    from core import updater
+
+    check("updater: APP_VERSION définie", APP_VERSION == "2.1.0")
+    check("updater: parse_version v2.1.0", parse_version("v2.1.0") == (2, 1, 0))
+    check("updater: parse_version robuste", parse_version("v10.2.3-beta") == (10, 2, 3))
+    check("updater: comparaison stricte",
+          updater.compare_versions("v99.0.0")[0] is True and
+          updater.compare_versions("v2.1.0")[0] is False and
+          updater.compare_versions("v2.0.9")[0] is False and
+          updater.compare_versions("v2.1.1")[0] is True)
+    check("updater: padding implicite (2,1) < (2,1,0)",
+          updater.compare_versions("v2.1")[0] is False)
+
+    # Mock réseau : API GitHub injoignable → None silencieux
+    orig_fetch = updater.fetch_latest_release
+    updater.fetch_latest_release = lambda timeout=120: None
+    check("updater: GitHub injoignable → None", updater.check_update() is None)
+
+    # Mock réseau : release plus récente avec asset .exe → dict d'update
+    updater.fetch_latest_release = lambda timeout=120: {
+        "tag_name": "v9.9.9",
+        "assets": [{"name": "GraphTenantManager.exe",
+                    "browser_download_url": "https://x/GraphTenantManager.exe",
+                    "url": "https://api.x/asset", "size": 12345}],
+        "body": "notes",
+    }
+    info = updater.check_update()
+    check("updater: release détectée", info is not None and
+          info["version"] == "9.9.9" and info["size"] == 12345)
+
+    # Release sans asset .exe → None
+    updater.fetch_latest_release = lambda timeout=120: {
+        "tag_name": "v9.9.9", "assets": [], "body": ""}
+    check("updater: sans asset .exe → None", updater.check_update() is None)
+    updater.fetch_latest_release = orig_fetch
+
+    # Téléchargement vers fichier temporaire (serveur HTTP local mocké)
+    import http.server, threading
+    payload = b"FAKEEXE" * 1000
+    class _H(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(200)
+            self.send_header("Content-Length", str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
+        def log_message(self, *a, **k):
+            pass
+    srv = http.server.HTTPServer(("127.0.0.1", 0), _H)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        url = f"http://127.0.0.1:{srv.server_address[1]}/GraphTenantManager.exe"
+        progress_calls = []
+        path = updater.download_update(url, progress_cb=lambda r, t: progress_calls.append((r, t)))
+        check("updater: téléchargement complet",
+              path is not None and os.path.exists(path) and
+              os.path.getsize(path) == len(payload))
+        check("updater: progression rapportée",
+              len(progress_calls) > 0 and progress_calls[-1][0] == len(payload))
+    finally:
+        srv.shutdown()
+    # Mode script : apply_update refuse proprement (pas un .exe)
+    check("updater: apply_update no-op en mode script",
+          updater.apply_update("/tmp/whatever.exe") is False)
+
 asyncio.run(run_tests_async())
 
 # ---------------------------------------------------------------- 5. GUI wiring (headless)
@@ -511,6 +578,12 @@ except Exception:
 if tk:
     root = tk.Tk()
     root.withdraw()
+    # Neutralise le réseau de l'updater : le check auto planifié par
+    # l'app (after 800ms) trouvera fetch_latest_release patché → None
+    # silencieux, aucun appel réel vers GitHub pendant le test headless.
+    from core import updater as _upd
+    _orig_fetch = _upd.fetch_latest_release
+    _upd.fetch_latest_release = lambda timeout=120: None
     config = {
         "clientId": "test", "tenantId": "common",
         "graphUserScopes": "User.Read.All", "theme": "clam",
@@ -567,6 +640,10 @@ if tk:
     check("gui: _clear_all_data vide les panneaux",
           len(app.sharepoint_panel.tree.get_children()) == 0 and
           app.sharepoint_panel.data == [])
+    # Mise à jour : le check planifié au démarrage ne crashe pas (méthode
+    # présente + runner branché) ; pas d'appel réseau réel en test.
+    check("gui: _check_for_updates existe", callable(app._check_for_updates))
+    check("gui: version au titre", "v2.1" in app.root.title())
     # dashboard display
     app._display_dashboard(7, 3, 3, {"id": "t", "display_name": "Contoso"},
                            [{"consumed": 9, "total": 10, "available": 1, "warning": True}])
@@ -592,6 +669,7 @@ if tk:
     d2.destroy()
 
     root.destroy()
+    _upd.fetch_latest_release = _orig_fetch  # restaure le vrai fetcher
     check("gui: destroy propre", True)
 
 # ---------------------------------------------------------------- Résultat

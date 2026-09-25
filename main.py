@@ -33,6 +33,15 @@ def main():
     # Config vide : tout est déduit automatiquement (auth well-known Microsoft).
     # Surcharge optionnelle : config.cfg à côté de l'exe (clientId, scopes...).
     config = load_optional_config()
+
+    # v2.1 : supprime un éventuel GraphTenantManager.old d'une mise à jour
+    # précédente (le fichier était verrouillé au moment du renommage).
+    try:
+        from core.updater import cleanup_stale_old
+        cleanup_stale_old()
+    except Exception:
+        pass  # jamais bloquant
+
     run_app(config)
 
 
