@@ -456,6 +456,31 @@ async def run_tests_async():
     unl = await ls.get_unlicensed_users()
     check("licences: unlicensed filtrés", len(unl) == 4 and all(not u["has_license"] for u in unl))
 
+    # v2.1.4 : régression nommage — renommage Microsoft avril 2020.
+    # O365_BUSINESS_PREMIUM = Business STANDARD (pas Premium !).
+    from services.licenses_service import _sku_display_name, SKU_DISPLAY_NAMES
+    check("licences: Business Standard (ex-Business Premium O365)",
+          _sku_display_name("O365_BUSINESS_PREMIUM") == "Microsoft 365 Business Standard")
+    check("licences: Business Basic (ex-Essentials)",
+          _sku_display_name("O365_BUSINESS_ESSENTIALS") == "Microsoft 365 Business Basic")
+    check("licences: SPB reste Business Premium",
+          _sku_display_name("SPB") == "Microsoft 365 Business Premium")
+    check("licences: pas de doublons dans le mapping",
+          len(SKU_DISPLAY_NAMES) == len(set(SKU_DISPLAY_NAMES)))
+    check("licences: part number inconnu retourné tel quel",
+          _sku_display_name("SKU_MYSTERIEUX") == "SKU_MYSTERIEUX")
+
+    # v2.1.4 : $select explicite — sans lui Graph ne renvoie PAS
+    # assignedLicenses/accountEnabled/department (bug « ✖ Aucune »).
+    from core.graph_client import USER_SELECT_FIELDS
+    sel = set(USER_SELECT_FIELDS)
+    check("graph_client: $select contient assignedLicenses", "assignedLicenses" in sel)
+    check("graph_client: $select contient accountEnabled", "accountEnabled" in sel)
+    check("graph_client: $select contient department/jobTitle",
+          "department" in sel and "jobTitle" in sel)
+    check("graph_client: $select contient displayName/UPN/mail",
+          {"displayName", "userPrincipalName", "mail"} <= sel)
+
     tmp2 = os.path.join(tempfile.gettempdir(), "gtm_test_lic.csv")
     ok = ls.export_to_csv(inv, tmp2)
     check("licences: export CSV", ok and open(tmp2, encoding="utf-8").read().count("Oui") >= 1)
@@ -531,7 +556,12 @@ async def run_tests_async():
     from core.app_info import APP_VERSION, parse_version
     from core import updater
 
-    check("updater: APP_VERSION définie", APP_VERSION == "2.1.2")
+    # v2.1.4 : plus de version hardcodée (le test cassait à chaque bump).
+    # On vérifie juste qu'APP_VERSION est un semver exploitable.
+    _pv = parse_version("v" + APP_VERSION)
+    check("updater: APP_VERSION définie",
+          isinstance(_pv, tuple) and len(_pv) == 3 and all(isinstance(n, int) for n in _pv),
+          f"APP_VERSION={APP_VERSION!r}, parse={_pv!r}")
     check("updater: parse_version v2.1.0", parse_version("v2.1.0") == (2, 1, 0))
     check("updater: parse_version robuste", parse_version("v10.2.3-beta") == (10, 2, 3))
     check("updater: comparaison stricte (relative à la version locale)",

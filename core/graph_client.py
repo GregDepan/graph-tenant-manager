@@ -20,6 +20,16 @@ from msgraph.generated.users.item.assign_license.assign_license_post_request_bod
     AssignLicensePostRequestBody,
 )
 
+# v2.1.4 : champs demandés explicitement à Graph pour /users — sans
+# $select, l'API renvoie un jeu minimal SANS assignedLicenses,
+# accountEnabled, department, jobTitle (licences/état vides en GUI).
+USER_SELECT_FIELDS = (
+    "id", "displayName", "mail", "userPrincipalName",
+    "jobTitle", "department", "officeLocation",
+    "mobilePhone", "businessPhones",
+    "accountEnabled", "assignedLicenses", "createdDateTime",
+)
+
 
 class GraphClientWrapper:
     """
@@ -92,18 +102,44 @@ class GraphClientWrapper:
         """
         Récupère les utilisateurs du tenant, pagination complète.
         limit=None → tous les utilisateurs.
+
+        v2.1.4 : $select explicite — sans lui, Graph ne renvoie PAS
+        assignedLicenses, accountEnabled, department, jobTitle (jeu
+        minimal par défaut) → licences et état affichés vides/faux.
         """
         try:
-            result = await self.client.users.get()
+            from msgraph.generated.users.users_request_builder import (
+                UsersRequestBuilder,
+            )
+            qp = UsersRequestBuilder.UsersRequestBuilderGetQueryParameters(
+                select=list(USER_SELECT_FIELDS),
+            )
+            rc = UsersRequestBuilder.UsersRequestBuilderGetRequestConfiguration(
+                query_parameters=qp,
+            )
+            result = await self.client.users.get(request_configuration=rc)
             return self._page_result(result, limit)
         except Exception as e:
             print(f"Erreur get_all_users: {e}")
             return []
 
     async def get_user_by_id(self, user_id: str) -> Optional[User]:
-        """Récupère un utilisateur par son ID (ou son UPN)"""
+        """
+        Récupère un utilisateur par son ID (ou son UPN).
+
+        v2.1.4 : $select explicite (cf. get_all_users).
+        """
         try:
-            return await self.client.users.by_user_id(user_id).get()
+            from msgraph.generated.users.item.user_item_request_builder import (
+                UserItemRequestBuilder,
+            )
+            qp = UserItemRequestBuilder.UserItemRequestBuilderGetQueryParameters(
+                select=list(USER_SELECT_FIELDS),
+            )
+            rc = UserItemRequestBuilder.UserItemRequestBuilderGetRequestConfiguration(
+                query_parameters=qp,
+            )
+            return await self.client.users.by_user_id(user_id).get(request_configuration=rc)
         except Exception as e:
             print(f"Erreur get_user_by_id: {e}")
             return None
@@ -112,6 +148,9 @@ class GraphClientWrapper:
         """
         Recherche des utilisateurs côté serveur via $filter startswith.
         Fallback : filtre client sur la liste complète.
+
+        v2.1.4 : $select explicite (cf. get_all_users) — la recherche
+        doit renvoyer les mêmes champs que la liste complète.
         """
         if not search_term:
             return []
@@ -122,6 +161,7 @@ class GraphClientWrapper:
             )
 
             qp = UsersRequestBuilder.UsersRequestBuilderGetQueryParameters(
+                select=list(USER_SELECT_FIELDS),
                 filter=(
                     f"startswith(displayName,'{term}') "
                     f"or startswith(userPrincipalName,'{term}')"

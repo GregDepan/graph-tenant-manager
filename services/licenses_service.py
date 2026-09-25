@@ -35,12 +35,17 @@ SKU_DISPLAY_NAMES: Dict[str, str] = {
     "SPE_E1": "Microsoft 365 E1",
     "SPB": "Microsoft 365 Business Premium",
     "CBA": "Microsoft 365 Business Basic",
-    "O365_BUSINESS_ESSENTIALS": "Office 365 Business Essentials",
-    "O365_BUSINESS_PREMIUM": "Office 365 Business Premium",
-    "O365_BUSINESS": "Office 365 Business",
-    "O365_BUSINESS_ESSENTIALS": "Office 365 Business Essentials",
+    # v2.1.4 : renommage officiel Microsoft (avril 2020). Les part
+    # numbers HISTORIQUES n'ont pas changé alors que les produits ont
+    # été renommés. Ex : un client « Business Standard » porte le part
+    # number O365_BUSINESS_PREMIUM (l'ancien nom du produit) — il
+    # fallait l'afficher « Business Standard », pas « Premium ».
+    "O365_BUSINESS_ESSENTIALS": "Microsoft 365 Business Basic",
+    "O365_BUSINESS_PREMIUM": "Microsoft 365 Business Standard",
+    "O365_BUSINESS": "Microsoft 365 Apps for business",
+    "SPB_INDIVIDUAL": "Microsoft 365 Business (individuel)",
     # Office 365 (offre historique entreprise)
-    "STANDARDPACK": "Office 365 Enterprise E1",
+    "STANDARDPACK": "Office 365 E1",
     "ENTERPRISEPACK": "Office 365 E3",
     "ENTERPRISEPREMIUM": "Office 365 E5",
     "ENTERPRISEPREMIUM_NOPSTNCONF": "Office 365 E5 (sans audioconf.)",
@@ -81,7 +86,6 @@ SKU_DISPLAY_NAMES: Dict[str, str] = {
     "FLOW_FREE": "Power Automate (gratuit)",
     "POWERAPPS_VIRAL": "Power Apps (essai)",
     "SPZA": "App Source",
-    "SPB_INDIVIDUAL": "Microsoft 365 Business (individuel)",
     "LITE": "Microsoft 365 F1 (lite)",
     "DESKLESSPACK_FACULTY": "Office 365 F3 (enseignants)",
     "STANDARD_WOFFPACK_FACULTY": "Office 365 A1 (enseignants)",

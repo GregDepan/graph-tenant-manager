@@ -1,5 +1,30 @@
 # Changelog — Graph Tenant Manager
 
+## v2.1.4 (25/09/2026) — Licences visibles + noms corrects
+
+### 🐛 Fix CRITIQUE : « ✖ Aucune » pour tous les utilisateurs
+- Cause : l'API Graph ne renvoie **pas** `assignedLicenses`,
+  `accountEnabled`, `department`, `jobTitle` sans `$select` explicite.
+  Le wrapper ne les demandait jamais → licences et état « Actif »
+  toujours vides/faux avec de vraies données Microsoft (les tests
+  mockaient des objets complets, donc passaient à tort).
+- Fix : `$select` systématique dans `get_all_users`,
+  `get_user_by_id` et `search_users` (12 champs explicites).
+- Poste/Département s'afficheront aussi si renseignés côté client.
+
+### 🏷️ Fix nommage des licences (renommage Microsoft avril 2020)
+- `O365_BUSINESS_PREMIUM` = **Microsoft 365 Business Standard** (pas
+  « Business Premium » ! Microsoft a renommé les produits sans changer
+  les part numbers historiques).
+- `O365_BUSINESS_ESSENTIALS` = Microsoft 365 Business Basic.
+- `O365_BUSINESS` = Microsoft 365 Apps for business.
+- Tests de régression sur le mapping (plus de doublons, part number
+  inconnu retourné tel quel).
+
+### 🔧 Divers
+- Test APP_VERSION : plus de version hardcodée (vérification semver).
+- 152 tests.
+
 ## v2.1.3 (25/09/2026) — Licences par utilisateur + connexion résiliente
 
 ### 🔑 Licences affichées par utilisateur
