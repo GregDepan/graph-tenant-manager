@@ -36,6 +36,11 @@ module PowerShell officiel. **Aucune installation**, aucun Python requis.
 
 - **Multi-tenant** : bascule entre clients en un clic, reconnexion silencieuse
   au démarrage (cache de tokens chiffré par Windows — zéro mot de passe stocké).
+- **Mises à jour automatiques** : au lancement, l'app vérifie les releases
+  GitHub en arrière-plan ; si une nouvelle version existe, une notification
+  propose la mise à jour — téléchargement avec progression, remplacement du
+  .exe et relance automatique (Aide → « Vérifier les mises à jour » pour un
+  check manuel).
 - **Interface non bloquante** : toutes les opérations Graph en arrière-plan.
 - **Fallback device code** automatique (RDP / serveur sans navigateur).
 

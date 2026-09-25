@@ -1,6 +1,16 @@
 # Changelog — Graph Tenant Manager
 
-## v2.1 (25/09/2026) — Workloads M365
+## v2.1 (25/09/2026) — Workloads M365 + mises à jour automatiques
+
+### 🔄 Mises à jour automatiques
+- Au lancement (800 ms après le splash, non bloquant), l'app interroge
+  `releases/latest` du repo GitHub et compare le tag à sa version.
+- Si une version plus récente existe : notification → téléchargement avec
+  barre de progression → remplacement du .exe (schéma `.old`, le binaire
+  en cours étant verrouillé par Windows) → relance automatique.
+- Check manuel : Aide → « Vérifier les mises à jour ».
+- Zéro dépendance (stdlib urllib) ; silencieux si GitHub est injoignable.
+- Requiert le repo **public** (sinon les téléchargements seraient bloqués).
 
 ### 🚀 4 nouveaux onglets
 - **🗂️ SharePoint** : inventaire des sites du tenant (`/sites/getAllSites`,
