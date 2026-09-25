@@ -356,6 +356,119 @@ class GraphClientWrapper:
             return None
 
     # ------------------------------------------------------------------
+    # SHAREPOINT / ONEDRIVE / TEAMS / EXCHANGE (workloads v2.1)
+    # ------------------------------------------------------------------
+
+    async def get_all_sites(self, limit: Optional[int] = None) -> List[Any]:
+        """
+        Récupère les sites SharePoint du tenant via /sites/getAllSites,
+        pagination complète.
+        """
+        try:
+            result = await self.client.sites.get_all_sites.get()
+            return self._page_result(result, limit)
+        except Exception as e:
+            print(f"Erreur get_all_sites: {e}")
+            return []
+
+    async def get_site_drives(self, site_id: str) -> List[Any]:
+        """Récupère les bibliothèques documentaires d'un site."""
+        try:
+            result = await self.client.sites.by_site_id(site_id).drives.get()
+            return self._page_result(result, None)
+        except Exception as e:
+            print(f"Erreur get_site_drives: {e}")
+            return []
+
+    async def get_user_drive(self, user_id: str) -> Optional[Any]:
+        """
+        Récupère le lecteur OneDrive d'un utilisateur (/users/{id}/drive).
+        None si l'utilisateur n'a pas de lecteur provisionné.
+        """
+        try:
+            return await self.client.users.by_user_id(user_id).drive.get()
+        except Exception as e:
+            print(f"Erreur get_user_drive: {e}")
+            return None
+
+    async def get_all_teams(self, limit: Optional[int] = None) -> List[Any]:
+        """
+        Récupère toutes les équipes du tenant.
+
+        /teams ne liste que les équipes dont l'utilisateur connecté est
+        membre — pour un inventaire MSP complet on filtre /groups sur
+        resourceProvisioningOptions/any(x:x eq 'Team').
+        """
+        try:
+            from msgraph.generated.groups.groups_request_builder import (
+                GroupsRequestBuilder,
+            )
+
+            qp = GroupsRequestBuilder.GroupsRequestBuilderGetQueryParameters(
+                filter="resourceProvisioningOptions/any(x:x eq 'Team')",
+                select=["id", "displayName", "mail", "proxyAddresses",
+                        "visibility", "createdDateTime", "description"],
+            )
+            rc = GroupsRequestBuilder.GroupsRequestBuilderGetRequestConfiguration(
+                query_parameters=qp,
+                headers={"ConsistencyLevel": "eventual"},
+            )
+            result = await self.client.groups.get(request_configuration=rc)
+            return self._page_result(result, limit)
+        except Exception as e:
+            print(f"Erreur get_all_teams: {e}")
+            return []
+
+    async def get_team_channels(self, team_id: str) -> List[Any]:
+        """Récupère les canaux d'une équipe."""
+        try:
+            result = await self.client.teams.by_team_id(team_id).channels.get()
+            return self._page_result(result, None)
+        except Exception as e:
+            print(f"Erreur get_team_channels: {e}")
+            return []
+
+    async def get_team_member_count(self, team_id: str) -> int:
+        """
+        Compte les membres d'une équipe via
+        /teams/{id}/members/$count (ConsistencyLevel eventual).
+        """
+        try:
+            from msgraph.generated.teams.item.members.members_request_builder import (
+                MembersRequestBuilder,
+            )
+
+            qp = MembersRequestBuilder.MembersRequestBuilderGetQueryParameters(
+                count=True, select=["id"]
+            )
+            rc = MembersRequestBuilder.MembersRequestBuilderGetRequestConfiguration(
+                query_parameters=qp,
+                headers={"ConsistencyLevel": "eventual"},
+            )
+            result = await self.client.teams.by_team_id(team_id).members.get(
+                request_configuration=rc
+            )
+            count = getattr(result, "odata_count", None)
+            if count is not None:
+                return int(count)
+        except Exception as e:
+            print(f"Erreur get_team_member_count: {e}")
+        return -1
+
+    async def get_mailbox_usage_report(self, period: str = "D30") -> bytes:
+        """
+        Rapport MailboxUsageDetail (CSV brut en bytes) de l'API Reports.
+        """
+        try:
+            raw = await self.client.reports.get_mailbox_usage_detail_with_period(
+                period
+            ).get()
+            return raw or b""
+        except Exception as e:
+            print(f"Erreur get_mailbox_usage_report: {e}")
+            return b""
+
+    # ------------------------------------------------------------------
     # TENANT INFO + COMPTAGES
     # ------------------------------------------------------------------
 

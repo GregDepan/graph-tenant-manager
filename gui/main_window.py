@@ -22,6 +22,10 @@ from services.users_service import UsersService
 from services.groups_service import GroupsService
 from services.devices_service import DevicesService
 from services.licenses_service import LicensesService
+from services.sharepoint_service import SharePointService
+from services.onedrive_service import OneDriveService
+from services.exchange_service import ExchangeService
+from services.teams_service import TeamsService
 from gui.dialogs import (
     UserCreateDialog,
     UserEditDialog,
@@ -50,6 +54,11 @@ class GraphTenantManagerApp:
         self.groups_service: Optional[GroupsService] = None
         self.devices_service: Optional[DevicesService] = None
         self.licenses_service: Optional[LicensesService] = None
+        # Workloads v2.1
+        self.sharepoint_service: Optional[SharePointService] = None
+        self.onedrive_service: Optional[OneDriveService] = None
+        self.exchange_service: Optional[ExchangeService] = None
+        self.teams_service: Optional[TeamsService] = None
 
         self.current_tenant_id: Optional[str] = None
         self.tenant_info: Optional[Dict[str, Any]] = None
@@ -104,6 +113,10 @@ class GraphTenantManagerApp:
         view_menu.add_command(label="Groupes", command=self._show_groups)
         view_menu.add_command(label="Appareils", command=self._show_devices)
         view_menu.add_command(label="Licences", command=self._show_licenses)
+        view_menu.add_command(label="SharePoint", command=lambda: self._show_workload_tab(5))
+        view_menu.add_command(label="OneDrive", command=lambda: self._show_workload_tab(6))
+        view_menu.add_command(label="Exchange", command=lambda: self._show_workload_tab(7))
+        view_menu.add_command(label="Teams", command=lambda: self._show_workload_tab(8))
 
         help_menu = tk.Menu(menubar, tearoff=0)
         menubar.add_cascade(label="Aide", menu=help_menu)
@@ -144,17 +157,38 @@ class GraphTenantManagerApp:
         self.groups_tab = ttk.Frame(self.notebook)
         self.devices_tab = ttk.Frame(self.notebook)
         self.licenses_tab = ttk.Frame(self.notebook)
+        # Workloads v2.1
+        self.sharepoint_tab = ttk.Frame(self.notebook)
+        self.onedrive_tab = ttk.Frame(self.notebook)
+        self.exchange_tab = ttk.Frame(self.notebook)
+        self.teams_tab = ttk.Frame(self.notebook)
 
         self.notebook.add(self.dashboard_tab, text="📊 Dashboard")
         self.notebook.add(self.users_tab, text="👥 Utilisateurs")
         self.notebook.add(self.groups_tab, text="👥 Groupes")
         self.notebook.add(self.devices_tab, text="📱 Appareils")
         self.notebook.add(self.licenses_tab, text="🔑 Licences")
+        self.notebook.add(self.sharepoint_tab, text="🗂️ SharePoint")
+        self.notebook.add(self.onedrive_tab, text="☁️ OneDrive")
+        self.notebook.add(self.exchange_tab, text="📧 Exchange")
+        self.notebook.add(self.teams_tab, text="💬 Teams")
 
         self._build_users_tab()
         self._build_groups_tab()
         self._build_devices_tab()
         self._build_licenses_tab()
+        # Workloads v2.1 — panneaux auto-contenus
+        from gui.workload_panels import (
+            SharePointPanel, OneDrivePanel, ExchangePanel, TeamsPanel,
+        )
+        self.sharepoint_panel = SharePointPanel(self)
+        self.onedrive_panel = OneDrivePanel(self)
+        self.exchange_panel = ExchangePanel(self)
+        self.teams_panel = TeamsPanel(self)
+        self.sharepoint_panel.build(self.sharepoint_tab)
+        self.onedrive_panel.build(self.onedrive_tab)
+        self.exchange_panel.build(self.exchange_tab)
+        self.teams_panel.build(self.teams_tab)
 
     def _create_status_bar(self):
         self.status_frame = ttk.Frame(self.root)
@@ -211,6 +245,17 @@ class GraphTenantManagerApp:
             btns += [self.btn_refresh_devices, self.btn_export_devices]
         if hasattr(self, 'btn_refresh_licenses'):
             btns += [self.btn_refresh_licenses, self.btn_unlicensed, self.btn_export_licenses]
+        # Workloads v2.1 : boutons des panneaux
+        for pname in ('sharepoint_panel', 'onedrive_panel',
+                      'exchange_panel', 'teams_panel'):
+            panel = getattr(self, pname, None)
+            if panel is not None:
+                btns += [b for b in (
+                    getattr(panel, 'btn_refresh', None),
+                    getattr(panel, 'btn_libraries', None),
+                    getattr(panel, 'btn_channels', None),
+                    getattr(panel, 'btn_export', None),
+                ) if b is not None]
         if hasattr(self, 'connect_btn'):
             btns += [self.connect_btn, self.refresh_btn]
         return [b for b in btns if b is not None]
@@ -227,6 +272,25 @@ class GraphTenantManagerApp:
             self._load_devices()
         elif tab == 4 and not self._licenses_data:
             self._load_licenses()
+        elif 5 <= tab <= 8:
+            panel = self._workload_panel(tab)
+            if panel is not None and not panel.data:
+                panel.refresh()
+
+    # Workloads v2.1 : sélecteur d'onglet + helpers ---------------------
+
+    def _workload_panel(self, tab_index: int):
+        """Retourne le panel workload pour l'index d'onglet (5-8), sinon None."""
+        mapping = {5: "sharepoint_panel", 6: "onedrive_panel",
+                   7: "exchange_panel", 8: "teams_panel"}
+        attr = mapping.get(tab_index)
+        return getattr(self, attr, None) if attr else None
+
+    def _show_workload_tab(self, index: int):
+        self.notebook.select(index)
+        panel = self._workload_panel(index)
+        if panel is not None and self.graph_wrapper and not panel.data:
+            panel.refresh()
 
     def _show_welcome(self):
         for widget in self.dashboard_tab.winfo_children():
@@ -981,6 +1045,11 @@ class GraphTenantManagerApp:
         self.groups_service = GroupsService(self.graph_wrapper)
         self.devices_service = DevicesService(self.graph_wrapper)
         self.licenses_service = LicensesService(self.graph_wrapper)
+        # Workloads v2.1
+        self.sharepoint_service = SharePointService(self.graph_wrapper)
+        self.onedrive_service = OneDriveService(self.graph_wrapper)
+        self.exchange_service = ExchangeService(self.graph_wrapper)
+        self.teams_service = TeamsService(self.graph_wrapper)
 
     def _clear_all_data(self):
         self._users_data = []
@@ -988,6 +1057,12 @@ class GraphTenantManagerApp:
         self._devices_data = []
         self._licenses_data = []
         self.tenant_info = None
+        # Workloads v2.1 : vider les treeviews + caches des panneaux
+        for panel in (self.sharepoint_panel, self.onedrive_panel,
+                      self.exchange_panel, self.teams_panel):
+            panel.data = []
+            if panel.tree is not None:
+                panel.tree.delete(*panel.tree.get_children())
 
     def _disconnect(self):
         if self.current_tenant_id:

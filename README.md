@@ -29,6 +29,10 @@ module PowerShell officiel. **Aucune installation**, aucun Python requis.
 | 👥 **Groupes** | Filtre type, créer, gérer membres, supprimer, export CSV |
 | 📱 **Appareils** | Filtre OS, conformité colorée, export CSV |
 | 🔑 **Licences** | Stock par SKU, alertes, utilisateurs sans licence, export CSV |
+| 🗂️ **SharePoint** | Inventaire des sites, bibliothèques documentaires (stockage), export CSV |
+| ☁️ **OneDrive** | Lecteurs par utilisateur, quotas (alerte < 5 Go), export CSV |
+| 📧 **Exchange** | Utilisation des boîtes (taille, éléments, dernière activité — D30), export CSV |
+| 💬 **Teams** | Inventaire des équipes (tout le tenant), canaux, effectifs, export CSV |
 
 - **Multi-tenant** : bascule entre clients en un clic, reconnexion silencieuse
   au démarrage (cache de tokens chiffré par Windows — zéro mot de passe stocké).

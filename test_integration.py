@@ -38,7 +38,10 @@ import py_compile
 for mod in ["main.py", "core/async_runner.py", "core/auth.py", "core/graph_client.py",
             "services/users_service.py", "services/groups_service.py",
             "services/devices_service.py", "services/licenses_service.py",
-            "gui/main_window.py", "gui/dialogs.py", "utils/logger.py"]:
+            "services/sharepoint_service.py", "services/onedrive_service.py",
+            "services/exchange_service.py", "services/teams_service.py",
+            "gui/main_window.py", "gui/dialogs.py", "gui/workload_panels.py",
+            "utils/logger.py"]:
     try:
         py_compile.compile(mod, doraise=True)
         check(f"py_compile {mod}", True)
@@ -132,7 +135,11 @@ from core.auth import TenantAuthManager, WELL_KNOWN_CLIENT_ID, cache_dir, DEFAUL
 auth = TenantAuthManager({})
 check("auth: client well-known par défaut", auth.client_id == WELL_KNOWN_CLIENT_ID)
 check("auth: client well-known = app MS Graph PowerShell", WELL_KNOWN_CLIENT_ID == "14d82eec-204b-4c2f-b7e8-296a70dab67e")
-check("auth: 11 scopes par défaut", len(auth.scopes) == 11 and "Directory.ReadWrite.All" in auth.scopes)
+check("auth: 17 scopes par défaut (v2.1 workloads)",
+      len(auth.scopes) == 17 and "Directory.ReadWrite.All" in auth.scopes
+      and "Sites.Read.All" in auth.scopes and "Team.ReadBasic.All" in auth.scopes
+      and "Reports.Read.All" in auth.scopes and "Files.Read.All" in auth.scopes
+      and "Channel.ReadBasic.All" in auth.scopes and "TeamMember.Read.All" in auth.scopes)
 check("auth: custom_app False", auth.custom_app is False)
 
 auth_custom = TenantAuthManager({"clientId": "mon-app-perso"})
@@ -227,6 +234,50 @@ class FakeSku:
         self.consumed_units = consumed
         self.prepaid_units = [types.SimpleNamespace(enabled=total)]
 
+
+# ---- Fakes workloads v2.1 -------------------------------------------
+
+class FakeSite:
+    def __init__(self, i, personal=False):
+        self.id = f"site{i}"
+        self.display_name = f"Site {i}"
+        self.web_url = f"https://contoso.sharepoint.com/sites/site{i}"
+        self.is_personal_site = personal
+        self.created_date_time = "2026-01-15T10:00:00Z"
+        self.last_modified_date_time = "2026-09-20T12:00:00Z"
+
+
+class FakeDrive:
+    def __init__(self, i, used, total, dtype="business"):
+        self.id = f"drive{i}"
+        self.name = f"Documents {i}"
+        self.drive_type = dtype
+        self.web_url = f"https://contoso.sharepoint.com/doc{i}"
+        self.quota = types.SimpleNamespace(
+            used=used, total=total, remaining=total - used, state="normal")
+
+
+class FakeTeamGroup:
+    def __init__(self, i, archived=False):
+        self.id = f"team{i}"
+        self.display_name = f"Équipe {i}"
+        self.mail = f"team{i}@contoso.com"
+        self.proxy_addresses = [f"SMTP:team{i}@contoso.com"]
+        self.visibility = "Private" if i == 0 else "Public"
+        self.created_date_time = "2026-02-01T09:00:00Z"
+        self.description = f"Équipe {i} du tenant"
+        self.is_archived = archived
+
+
+class FakeChannel:
+    def __init__(self, i, ctype="standard"):
+        self.id = f"ch{i}"
+        self.display_name = f"Canal {i}"
+        self.description = f"Desc canal {i}"
+        self.membership_type = ctype
+        self.email = f"ch{i}@contoso.com"
+        self.created_date_time = "2026-02-05T09:00:00Z"
+
 class FakeGraphWrapper:
     """Mock conforme au contrat GraphClientWrapper."""
     async def get_all_users(self, limit=None):
@@ -270,6 +321,31 @@ class FakeGraphWrapper:
         return 3
     async def get_tenant_devices_count(self):
         return 3
+    # ---- Workloads v2.1 ----
+    async def get_all_sites(self, limit=None):
+        return [FakeSite(1), FakeSite(2), FakeSite(3, personal=True)]
+    async def get_site_drives(self, site_id):
+        return [FakeDrive(1, 5 * 1024**3, 100 * 1024**3),
+                FakeDrive(2, 0, 100 * 1024**3)]
+    async def get_user_drive(self, user_id):
+        if user_id in ("u5", "u6"):
+            return None  # pas de OneDrive provisionné
+        return FakeDrive(int(user_id[1:]), 2 * 1024**3, 1024 * 1024**3,
+                         dtype="personal")
+    async def get_all_teams(self, limit=None):
+        return [FakeTeamGroup(0), FakeTeamGroup(1, archived=True)]
+    async def get_team_channels(self, team_id):
+        return [FakeChannel(0), FakeChannel(1, ctype="private")]
+    async def get_team_member_count(self, team_id):
+        return 12
+    async def get_mailbox_usage_report(self, period="D30"):
+        return (
+            "Report Refresh Date,User Principal Name,Display Name,Is Deleted,"
+            "Storage Used (Byte),Item Count,Last Activity Date\r\n"
+            "2026-09-25,alice@contoso.com,Alice Martin,False,1073741824,1200,2026-09-24\r\n"
+            "2026-09-25,bob@contoso.com,Bob Dupont,True,536870912,300,2026-09-10\r\n"
+            "2026-09-25,carole@contoso.com,Carole Bernard,False,2147483648,3400,\r\n"
+        ).encode("utf-8")
 
 async def run_tests_async():
     global PASS, FAIL
@@ -354,6 +430,73 @@ async def run_tests_async():
     ok = ls.export_to_csv(inv, tmp2)
     check("licences: export CSV", ok and open(tmp2, encoding="utf-8").read().count("Oui") >= 1)
 
+    # ---- Workloads v2.1 : SharePoint / OneDrive / Exchange / Teams ----
+    from services.sharepoint_service import SharePointService
+    from services.onedrive_service import OneDriveService
+    from services.exchange_service import ExchangeService
+    from services.teams_service import TeamsService
+
+    # SharePoint
+    sps = SharePointService(fw)
+    sites = await sps.get_sites()
+    check("sharepoint: 2 sites (perso exclu)", len(sites) == 2)
+    check("sharepoint: champs du contrat",
+          all(k in sites[0] for k in ("id", "name", "url", "created",
+                                      "last_modified", "personal")))
+    libs = await sps.get_libraries("site1")
+    check("sharepoint: 2 bibliothèques", len(libs) == 2)
+    check("sharepoint: quota lu", libs[0]["storage_quota"] == 100 * 1024**3)
+    all_sites = await sps.get_sites(include_personal=True)
+    check("sharepoint: include_personal=True → 3", len(all_sites) == 3)
+    tmp3 = os.path.join(tempfile.gettempdir(), "gtm_test_sites.csv")
+    ok = sps.export_to_csv(sites, tmp3)
+    check("sharepoint: export CSV", ok and "SharePoint" in open(tmp3, encoding="utf-8").read())
+
+    # OneDrive
+    ods = OneDriveService(fw)
+    drives = await ods.get_drives()
+    check("onedrive: 5 lecteurs (2 sans drive)", len(drives) == 5)
+    check("onedrive: tri par propriétaire",
+          drives[0]["owner"] == "User 0")
+    check("onedrive: quota/remaining lus",
+          drives[0]["storage_used"] == 2 * 1024**3 and
+          drives[0]["storage_remaining"] == 1022 * 1024**3)
+    tmp4 = os.path.join(tempfile.gettempdir(), "gtm_test_od.csv")
+    ok = ods.export_to_csv(drives, tmp4)
+    check("onedrive: export CSV", ok and "Go" in open(tmp4, encoding="utf-8").read())
+
+    # Exchange
+    exs = ExchangeService(fw)
+    boxes = await exs.get_mailbox_usage()
+    check("exchange: 2 boîtes (supprimée exclue)", len(boxes) == 2)
+    alice = [b for b in boxes if b["upn"] == "alice@contoso.com"][0]
+    check("exchange: parsing tailles/activité",
+          alice["storage_used"] == 1024**3 and alice["item_count"] == 1200
+          and alice["last_activity"] == "2026-09-24")
+    carole = [b for b in boxes if b["upn"] == "carole@contoso.com"][0]
+    check("exchange: activité vide tolérée", carole["last_activity"] == "")
+    tmp5 = os.path.join(tempfile.gettempdir(), "gtm_test_ex.csv")
+    ok = exs.export_to_csv(boxes, tmp5)
+    check("exchange: export CSV", ok and "Alice" in open(tmp5, encoding="utf-8").read())
+
+    # Teams
+    ts = TeamsService(fw)
+    teams = await ts.get_all_teams_formatted()
+    check("teams: 2 équipes", len(teams) == 2)
+    check("teams: champs du contrat",
+          all(k in teams[0] for k in ("id", "name", "mail", "visibility",
+                                      "archived", "created", "member_count")))
+    check("teams: archivée détectée", teams[1]["archived"] is True)
+    chans = await ts.get_team_channels("team0")
+    check("teams: 2 canaux", len(chans) == 2)
+    check("teams: type privé détecté",
+          chans[1]["type"] == "private")
+    cnt = await ts.get_team_member_count("team0")
+    check("teams: member count", cnt == 12)
+    tmp6 = os.path.join(tempfile.gettempdir(), "gtm_test_teams.csv")
+    ok = ts.export_to_csv(teams, tmp6)
+    check("teams: export CSV", ok and "Oui" in open(tmp6, encoding="utf-8").read())
+
 asyncio.run(run_tests_async())
 
 # ---------------------------------------------------------------- 5. GUI wiring (headless)
@@ -375,8 +518,8 @@ if tk:
     }
     app = GraphTenantManagerApp(root, config)
 
-    # L'app a bien 5 onglets
-    check("gui: 5 onglets", len(app.notebook.tabs()) == 5, f"{len(app.notebook.tabs())}")
+    # L'app a bien 9 onglets (5 historiques + 4 workloads v2.1)
+    check("gui: 9 onglets", len(app.notebook.tabs()) == 9, f"{len(app.notebook.tabs())}")
     # Boutons d'action présents
     check("gui: boutons users (7)", len(app.users_btns) == 7, f"{len(app.users_btns)}")
     check("gui: boutons groups (4)", len(app.groups_btns) == 4)
@@ -396,6 +539,34 @@ if tk:
     app._render_licenses([{"sku_id": "s1", "part_number": "P", "display_name": "Prod",
                            "total": 10, "consumed": 9, "available": 1, "warning": True}])
     check("gui: _render_licenses + tag warning", "warning" in app.licenses_tree.item(app.licenses_tree.get_children()[0], "tags"))
+
+    # ---- Workloads v2.1 : panneaux construits + rendus mockés ----
+    check("gui: 4 panneaux workload instanciés",
+          all(hasattr(app, n) and getattr(app, n) is not None
+              for n in ("sharepoint_panel", "onedrive_panel",
+                        "exchange_panel", "teams_panel")))
+    app.sharepoint_panel.renderer([
+        {"id": "site1", "name": "Site 1", "url": "https://x", "created": "",
+         "last_modified": "", "personal": False}])
+    check("gui: rendu SharePoint", len(app.sharepoint_panel.tree.get_children()) == 1)
+    app.teams_panel.renderer([
+        {"id": "team0", "name": "Équipe 0", "mail": "t@c.com",
+         "visibility": "Public", "archived": False, "created": ""}])
+    check("gui: rendu Teams", len(app.teams_panel.tree.get_children()) == 1)
+    # _workload_panel : mapping index → panneau
+    check("gui: mapping _workload_panel",
+          app._workload_panel(5) is app.sharepoint_panel and
+          app._workload_panel(8) is app.teams_panel and
+          app._workload_panel(2) is None)
+    # _init_services instancie aussi les services workload
+    check("gui: _init_services → 8 services",
+          app.sharepoint_service is not None and app.onedrive_service is not None
+          and app.exchange_service is not None and app.teams_service is not None)
+    # déconnexion : _clear_all_data vide les panneaux
+    app._clear_all_data()
+    check("gui: _clear_all_data vide les panneaux",
+          len(app.sharepoint_panel.tree.get_children()) == 0 and
+          app.sharepoint_panel.data == [])
     # dashboard display
     app._display_dashboard(7, 3, 3, {"id": "t", "display_name": "Contoso"},
                            [{"consumed": 9, "total": 10, "available": 1, "warning": True}])

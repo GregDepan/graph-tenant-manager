@@ -1,5 +1,41 @@
 # Changelog — Graph Tenant Manager
 
+## v2.1 (25/09/2026) — Workloads M365
+
+### 🚀 4 nouveaux onglets
+- **🗂️ SharePoint** : inventaire des sites du tenant (`/sites/getAllSites`,
+  pagination complète), bibliothèques documentaires par site avec
+  stockage utilisé/quota, export CSV. Sites personnels exclus par défaut
+  (option pour les inclure).
+- **☁️ OneDrive** : lecteurs personnels par utilisateur
+  (`/users/{id}/drive`), quotas consommés/totaux/restants, alerte rouge
+  quand il reste moins de 5 Go, export CSV.
+- **📧 Exchange** : rapport d'utilisation des boîtes (Reports API
+  `MailboxUsageDetail` D30) — taille, nombre d'éléments, dernière
+  activité, boîtes supprimées exclues, export CSV. Parsing durci : les
+  colonnes sont localisées par intitulé (Microsoft peut les réordonner).
+- **💬 Teams** : inventaire des équipes de **tout le tenant** (via
+  `groups?filter=resourceProvisioningOptions/any(x:x eq 'Team')` — pas
+  seulement celles dont l'admin est membre), canaux avec type
+  (standard/privé/partagé), nombre de membres via `$count`, export CSV.
+
+### 🔐 Scopes
+- 6 scopes ajoutés pour les workloads : `Sites.Read.All`,
+  `Files.Read.All`, `Reports.Read.All`, `Team.ReadBasic.All`,
+  `Channel.ReadBasic.All`, `TeamMember.Read.All`.
+- Les tenants déjà connectés doivent se **reconnecter une fois** pour
+  consentir aux nouveaux scopes (case admin pas nécessaire : ce sont
+  des scopes délégués simples).
+
+### 🧹 Correctifs
+- **Licences — crash du bouton « Utilisateurs sans licence »** :
+  corruption `super().__initasks__` (génération de code) + colonne
+  `'de pt'` invalide + `ok_btn` accédé avant construction par
+  `BaseDialog`. Corrigé ; ajout de tests d'instanciation des dialogues
+  (le trou qui avait laissé passer le bug).
+- Tests : 81 → **113 vérifications** (workloads mockés, GUI 9 onglets,
+  déconnexion qui vide les panneaux).
+
 ## v2.0 (24/09/2026) — CLÉ EN MAIN
 
 ### 🚀 Zéro configuration

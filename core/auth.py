@@ -47,7 +47,10 @@ DEFAULT_SCOPES = (
     "User.Read.All User.ReadWrite.All Directory.Read.All Directory.ReadWrite.All "
     "Group.Read.All Group.ReadWrite.All GroupMember.Read.All "
     "Device.Read.All DeviceManagementManagedDevices.Read.All "
-    "Organization.Read.All AuditLog.Read.All"
+    "Organization.Read.All AuditLog.Read.All "
+    # Workloads v2.1 : SharePoint, OneDrive, Exchange (Reports), Teams
+    "Sites.Read.All Files.Read.All Reports.Read.All "
+    "Team.ReadBasic.All Channel.ReadBasic.All TeamMember.Read.All"
 )
 
 
