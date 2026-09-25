@@ -109,20 +109,50 @@ class GraphTenantManagerApp:
     # MISES À JOUR AUTOMATIQUES (v2.1)
     # ------------------------------------------------------------------
 
-    def _check_for_updates(self):
-        """Interroge GitHub en arrière-plan ; propose la mise à jour le cas échéant."""
+    def _check_for_updates(self, manual: bool = False):
+        """Interroge GitHub en arrière-plan ; propose la mise à jour le cas échéant.
+
+        manual=True (menu Aide, v2.1.6) : notifie TOUJOURS le résultat —
+        « à jour », « injoignable » ou « disponible ». L'auto-check au
+        démarrage reste silencieux s'il n'y a rien à dire.
+        """
         import core.updater as updater
 
+        if manual:
+            self._set_busy("Vérification des mises à jour...")
+
         def check():
-            return updater.check_update()
+            return updater.check_update(verbose=manual)
 
         def on_result(info):
-            if not info:
-                return  # à jour, ou GitHub injoignable : silence
-            self.root.after(0, lambda: self._offer_update(info))
+            def apply():
+                if manual:
+                    self._set_idle()
+                if info:
+                    self._offer_update(info)
+                elif manual:
+                    # v2.1.6 : confirmation explicite quand on force le check
+                    messagebox.showinfo(
+                        "✓ À jour",
+                        f"Aucune mise à jour disponible.\n"
+                        f"Vous utilisez déjà la version la plus récente "
+                        f"(v{APP_VERSION_LOCAL}).",
+                        parent=self.root,
+                    )
+            self.root.after(0, apply)
 
-        def on_error(_):
-            pass  # jamais bloquant : on ignore silencieusement
+        def on_error(e):
+            def apply():
+                if manual:
+                    self._set_idle()
+                    messagebox.showerror(
+                        "Vérification impossible",
+                        f"La vérification des mises à jour a échoué :\n\n{e}\n\n"
+                        f"Réessayez plus tard, ou consultez "
+                        f"https://github.com/GregDepan/graph-tenant-manager/releases",
+                        parent=self.root,
+                    )
+            self.root.after(0, apply)
 
         self.runner.run_in_thread(check, callback=on_result, error_callback=on_error)
 
@@ -248,7 +278,7 @@ class GraphTenantManagerApp:
         help_menu.add_command(label="Documentation", command=self._show_help)
         help_menu.add_separator()
         help_menu.add_command(label="🔄 Vérifier les mises à jour",
-                              command=self._check_for_updates)
+                              command=lambda: self._check_for_updates(manual=True))
         help_menu.add_command(label="À propos", command=self._show_about)
 
     def _create_main_layout(self):

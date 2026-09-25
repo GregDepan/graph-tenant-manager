@@ -43,6 +43,10 @@ DOWNLOAD_TIMEOUT = 120          # secondes — la 1re requête
 CHUNK = 1024 * 256             # 256 Ko par bloc de téléchargement
 
 
+class UpdaterError(Exception):
+    """Erreur explicite du mode verbeux (check manuel v2.1.6)."""
+
+
 def is_frozen() -> bool:
     """True si l'app tourne en .exe PyInstaller."""
     return getattr(sys, "frozen", False)
@@ -95,20 +99,34 @@ def compare_versions(remote_tag: str) -> Tuple[bool, tuple]:
     return remote > local, remote
 
 
-def check_update() -> Optional[Dict[str, Any]]:
+def check_update(verbose: bool = False) -> Optional[Dict[str, Any]]:
     """
     Vérifie si une mise à jour est disponible.
 
+    Args:
+        verbose: True pour un check MANUEL (menu Aide) — distingue
+            « à jour », « injoignable » et « dispo » au lieu de fondre
+            les deux premiers dans None (v2.1.6).
+
     Returns:
         Dict {version, tag, url, exe_asset_url, size} si une release
-        plus récente avec un asset .exe existe, sinon None.
+        plus récente avec un asset .exe existe.
+        verbose=False : None sinon (auto-check silencieux au démarrage).
+        verbose=True : None si à jour ; lève UpdaterError si injoignable.
     """
     release = fetch_latest_release()
     if release is None:
+        if verbose:
+            raise UpdaterError(
+                "Impossible de contacter GitHub (réseau indisponible, "
+                "pare-feu ou limite de débit atteinte)."
+            )
         return None
 
     newer, remote_tuple = compare_versions(release.get("tag_name", ""))
     if not newer:
+        if verbose:
+            return None  # à jour : le caller affichera la notification
         return None
 
     # Cherche l'asset .exe de la release
@@ -124,6 +142,11 @@ def check_update() -> Optional[Dict[str, Any]]:
                 "notes": release.get("body", "") or "",
             }
     logger.info("Mise à jour dispo (%s) mais sans asset .exe", release.get("tag_name"))
+    if verbose:
+        raise UpdaterError(
+            f"Une nouvelle version ({release.get('tag_name')}) existe "
+            f"mais son fichier .exe n'est pas encore publié."
+        )
     return None
 
 

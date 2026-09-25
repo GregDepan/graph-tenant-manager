@@ -1,5 +1,17 @@
 # Changelog — Graph Tenant Manager
 
+## v2.1.6 (25/09/2026) — Notification « à jour » sur le check manuel
+
+### 🔔 Menu Aide → « Vérifier les mises à jour » notifie toujours
+- **À jour** : boîte « ✓ Aucune mise à jour disponible — vous utilisez
+  déjà la version la plus récente (vX.Y.Z) » (avant : silence total,
+  impossible de savoir si le check avait eu lieu).
+- **Injoignable** : message d'erreur explicite (réseau, pare-feu, limite
+  de débit GitHub) au lieu de rien — avec lien vers la page releases.
+- **Disponible** : comportement inchangé (proposition de mise à jour).
+- L'auto-check au démarrage reste silencieux : `check_update(verbose=)`
+  distingue maintenant les trois cas en interne (`UpdaterError`).
+
 ## v2.1.5 (25/09/2026) — Bascule multi-tenant + tri/filtre intelligents
 
 ### 🔀 Fix bascule entre tenants connectés

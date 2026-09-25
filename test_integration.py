@@ -553,7 +553,7 @@ async def run_tests_async():
     check("teams: export CSV", ok and "Oui" in open(tmp6, encoding="utf-8").read())
 
     # ---- Mises à jour automatiques (v2.1) ----
-    from core.app_info import APP_VERSION, parse_version
+    from core.app_info import APP_VERSION, EXE_NAME, parse_version
     from core import updater
 
     # v2.1.4 : plus de version hardcodée (le test cassait à chaque bump).
@@ -568,6 +568,32 @@ async def run_tests_async():
           updater.compare_versions("v99.0.0")[0] is True and
           updater.compare_versions(APP_VERSION)[0] is False and
           updater.compare_versions("v2.0.9")[0] is False)
+    # v2.1.6 : mode verbeux (check manuel) — distingue à jour / injoignable
+    from core.updater import UpdaterError
+    from core import updater as _upd_core
+    check("updater: UpdaterError existe", issubclass(UpdaterError, Exception))
+    # fetch patché → None : silencieux en auto, UpdaterError en manuel
+    _upd_core.fetch_latest_release = lambda timeout=120: None
+    check("updater: auto-check silencieux si injoignable",
+          updater.check_update() is None)
+    try:
+        updater.check_update(verbose=True)
+        check("updater: manuel injoignable → UpdaterError", False, "pas d'exception")
+    except UpdaterError:
+        check("updater: manuel injoignable → UpdaterError", True)
+    except Exception as e:
+        check("updater: manuel injoignable → UpdaterError", False, str(e))
+    # Release identique à la version locale → « à jour » (None, pas d'erreur)
+    _upd_core.fetch_latest_release = lambda timeout=120: {
+        "tag_name": "v" + APP_VERSION,
+        "assets": [{"name": EXE_NAME, "size": 10, "browser_download_url": "http://x",
+                    "url": "http://x"}],
+    }
+    try:
+        check("updater: manuel à jour → None (notification à afficher)",
+              updater.check_update(verbose=True) is None)
+    except UpdaterError as e:
+        check("updater: manuel à jour → None (notification à afficher)", False, str(e))
     check("updater: padding implicite (2,1) < (2,1,0)",
           updater.compare_versions("v2.1")[0] is False)
 
