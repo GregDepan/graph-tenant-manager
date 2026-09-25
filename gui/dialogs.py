@@ -947,8 +947,12 @@ class UnlicensedUsersDialog(BaseDialog):
                  on_export: Optional[Callable[[List[Dict[str, Any]]], None]] = None):
         self.users = users or []
         self.on_export = on_export
-        super().__initasks__(parent, "👤 Utilisateurs sans licence", width=640)
+        super().__init__(parent, "👤 Utilisateurs sans licence", width=640)
         self.geometry(f"{640}x{520}")
+        # Les boutons sont créés par BaseDialog APRÈS _build_ui : on les
+        # personnalise ici (Fermer seul, pas d'Annuler).
+        self.ok_btn.config(text="Fermer", command=self.destroy)
+        self.cancel_btn.pack_forget()
 
     def _build_ui(self, parent: ttk.Frame):
         main = ttk.Frame(parent)
@@ -970,7 +974,6 @@ class UnlicensedUsersDialog(BaseDialog):
         self.users_tree.heading("email", text="Email")
         self.users_tree.column("email", width=220, anchor=tk.W)
         self.users_tree.heading("dept", text="Département")
-        self.users_tree.column("de pt", width=130, anchor=tk.W)
         self.users_tree.column("dept", width=130, anchor=tk.W)
         self.users_tree.heading("job", text="Poste")
         self.users_tree.column("job", width=130, anchor=tk.W)
@@ -984,9 +987,6 @@ class UnlicensedUsersDialog(BaseDialog):
             self.users_tree.insert("", tk.END, iid=u.get("id"), text=u.get("display_name", "N/A"),
                                    values=(u.get("email", "") or u.get("user_principal_name", ""),
                                            u.get("department", ""), u.get("job_title", "")))
-
-        self.ok_btn.config(text="Fermer")
-        self.cancel_btn.pack_forget()
 
     def _on_export(self):
         if self.on_export:

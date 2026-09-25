@@ -361,12 +361,11 @@ print("\n[5] GUI wiring (headless — construction logique uniquement)")
 
 try:
     import tkinter as tk
-    has_tk = True
 except Exception:
-    has_tk = False
+    tk = None
     print("  (tkinter indisponible — partie GUI wiring sautée)")
 
-if has_tk:
+if tk:
     root = tk.Tk()
     root.withdraw()
     config = {
@@ -401,6 +400,26 @@ if has_tk:
     app._display_dashboard(7, 3, 3, {"id": "t", "display_name": "Contoso"},
                            [{"consumed": 9, "total": 10, "available": 1, "warning": True}])
     check("gui: dashboard affiché", len(app.dashboard_tab.winfo_children()) > 0)
+
+    # ---- 5b. Instanciation des dialogues (régression __initasks__ v2.0) ----
+    # Le bug v2.0 (super().__initasks__ dans UnlicensedUsersDialog) n'était
+    # pas détecté car aucun test n'instanciait les dialogues. On construit
+    # maintenant chaque dialogue critique headless.
+    # NB : sous Xvfb sans window manager, les Toplevel ne sont jamais
+    # « mappés » par le serveur X → wait_visibility() attendrait pour
+    # toujours. On le neutralise pour ce test uniquement (en usage réel
+    # avec un WM, le comportement est inchangé).
+    tk.Toplevel.wait_visibility = lambda self, *a, **k: None
+    from gui.dialogs import UnlicensedUsersDialog, AssignLicenseDialog
+    d1 = UnlicensedUsersDialog(root, [{"id": "u1", "display_name": "A",
+                                       "email": "a@c.com", "has_license": False}])
+    check("gui: UnlicensedUsersDialog instancié (fix __initasks__)", d1 is not None)
+    d1.destroy()
+    d2 = AssignLicenseDialog(root, [{"sku_id": "s1", "display_name": "Prod",
+                                     "available": 5}], current_skus=[])
+    check("gui: AssignLicenseDialog instancié", d2 is not None)
+    d2.destroy()
+
     root.destroy()
     check("gui: destroy propre", True)
 
