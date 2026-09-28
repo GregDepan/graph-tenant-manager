@@ -680,6 +680,13 @@ if tk:
         "language": "fr", "refresh_interval": 300, "log_level": "INFO", "log_file": "",
     }
     app = GraphTenantManagerApp(root, config)
+    # v2.1.7 : neutralisation TÔT (headless Xvfb sans window manager) —
+    # wait_visibility()/wait_window() (modélité v2.1.7) attendraient
+    # pour toujours sur un Toplevel jamais mappé. À placer AVANT toute
+    # instanciation de dialogue (UserDetailDialog plus bas inclus).
+    # En usage réel avec un WM, le comportement est inchangé.
+    tk.Toplevel.wait_visibility = lambda self, *a, **k: None
+    tk.Toplevel.wait_window = lambda self, *a, **k: None
 
     # L'app a bien 9 onglets (5 historiques + 4 workloads v2.1)
     check("gui: 9 onglets", len(app.notebook.tabs()) == 9, f"{len(app.notebook.tabs())}")
@@ -755,18 +762,39 @@ if tk:
           app.sharepoint_service is not None and app.onedrive_service is not None
           and app.exchange_service is not None and app.teams_service is not None)
     # déconnexion : _clear_all_data vide les panneaux
+    # v2.1.7 : vide AUSSI les treeviews principaux (users/groups/devices/
+    # licenses) — après un changement de tenant, ils affichaient encore
+    # les données du tenant précédent.
     app._clear_all_data()
     check("gui: _clear_all_data vide les panneaux",
           len(app.sharepoint_panel.tree.get_children()) == 0 and
           app.sharepoint_panel.data == [])
+    check("gui: _clear_all_data vide les treeviews principaux",
+          len(app.users_tree.get_children()) == 0 and
+          len(app.groups_tree.get_children()) == 0 and
+          len(app.devices_tree.get_children()) == 0 and
+          len(app.licenses_tree.get_children()) == 0 and
+          app._users_data == [] and app._licenses_data == [],
+          f"u={len(app.users_tree.get_children())} g={len(app.groups_tree.get_children())} "
+          f"d={len(app.devices_tree.get_children())} l={len(app.licenses_tree.get_children())}")
     # Mise à jour : le check planifié au démarrage ne crashe pas (méthode
     # présente + runner branché) ; pas d'appel réseau réel en test.
     check("gui: _check_for_updates existe", callable(app._check_for_updates))
     check("gui: version au titre", "v2.1" in app.root.title())
-    # dashboard display
-    app._display_dashboard(7, 3, 3, {"id": "t", "display_name": "Contoso"},
-                           [{"consumed": 9, "total": 10, "available": 1, "warning": True}])
-    check("gui: dashboard affiché", len(app.dashboard_tab.winfo_children()) > 0)
+    # dashboard display — v2.1.7 : signature portfolio (récap multi-tenant)
+    portfolio = [
+        {"tenant_id": "t-aaa", "label": "Contoso", "users": 7, "groups": 3, "devices": 3,
+         "licenses_total": 25, "licenses_consumed": 24, "reduced": False,
+         "alerts": [{"name": "Microsoft 365 E3", "available": 1}], "error": None},
+        {"tenant_id": "t-bbb", "label": "Fabrikam", "users": 12, "groups": 5, "devices": 8,
+         "licenses_total": 40, "licenses_consumed": 10, "reduced": True,
+         "alerts": [], "error": None},
+    ]
+    app._display_dashboard(portfolio)
+    check("gui: dashboard portfolio affiché",
+          len(app.dashboard_tab.winfo_children()) > 0)
+    check("gui: portfolio stocké", app._portfolio_data == portfolio or
+          len(app._portfolio_data) == 2)
 
     # ---- 5b. Tri + filtre intelligents (v2.1.5) ----
     print("  [5b] Tri/filtre tableaux (TableEnhancer)")
@@ -825,21 +853,29 @@ if tk:
     check("multi-tenant: dropdown = libellés uniques",
           list(app.tenant_combo["values"]) == ["u@t-aaa", "u@t-bbb"],
           str(app.tenant_combo["values"]))
+    # v2.1.7 : avant de basculer, on met une ligne dans le tableau users
+    # (simulation de données du tenant A) — elle doit disparaître.
+    app.users_tree.insert("", "end", iid="old-user",
+                          values=("Ancien", "old@a.com", "", "", "", "Oui", "old@a.com"))
+    check("multi-tenant: ligne de test insérée",
+          len(app.users_tree.get_children()) == 1)
     app.tenant_var.set("u@t-bbb")
     app._on_tenant_selected(None)
     check("multi-tenant: bascule vers le 2e tenant",
           app.current_tenant_id == "t-bbb", str(app.current_tenant_id))
+    check("multi-tenant: tableau users VIDÉ après bascule (v2.1.7)",
+          len(app.users_tree.get_children()) == 0,
+          f"{len(app.users_tree.get_children())} ligne(s) restante(s)")
+    check("multi-tenant: wrapper rebranché sur le nouveau client",
+          app.graph_wrapper is not None, str(type(app.graph_wrapper)))
     ttree.destroy()
 
     # ---- 5c. Instanciation des dialogues (régression __initaks__ v2.0) ----
     # Le bug v2.0 (super().__initasks__ dans UnlicensedUsersDialog) n'était
     # pas détecté car aucun test n'instanciait les dialogues. On construit
     # maintenant chaque dialogue critique headless.
-    # NB : sous Xvfb sans window manager, les Toplevel ne sont jamais
-    # « mappés » par le serveur X → wait_visibility() attendrait pour
-    # toujours. On le neutralise pour ce test uniquement (en usage réel
-    # avec un WM, le comportement est inchangé).
-    tk.Toplevel.wait_visibility = lambda self, *a, **k: None
+    # NB : wait_visibility()/wait_window() sont neutralisés en tête de
+    # section GUI (v2.1.7) — rien à faire ici.
     d1 = UnlicensedUsersDialog(root, [{"id": "u1", "display_name": "A",
                                        "email": "a@c.com", "has_license": False}])
     check("gui: UnlicensedUsersDialog instancié (fix __initasks__)", d1 is not None)
@@ -848,6 +884,26 @@ if tk:
                                      "available": 5}], current_skus=[])
     check("gui: AssignLicenseDialog instancié", d2 is not None)
     d2.destroy()
+    # v2.1.7 : hauteur calculée APRÈS le pack des boutons Valider/Annuler
+    # (le popup licences restait trop bas → boutons invisibles).
+    d2b = AssignLicenseDialog(root, [{"sku_id": "s1", "display_name": "Prod",
+                                      "available": 5}], current_skus=[])
+    d2b.update_idletasks()
+    btn_ok_bottom = d2b.ok_btn.winfo_rooty() + d2b.ok_btn.winfo_height()
+    win_bottom = d2b.winfo_rooty() + d2b.winfo_height()
+    check("gui: boutons Valider/Annuler DANS le popup (fix hauteur)",
+          btn_ok_bottom <= win_bottom + 2,
+          f"btn {btn_ok_bottom} vs fenêtre {win_bottom}")
+    d2b.destroy()
+    # v2.1.7 : wait_window → result lu après fermeture ; on vérifie que
+    # _on_ok construit bien le résultat (simulation clic Valider).
+    d2c = AssignLicenseDialog(root, [{"sku_id": "s1", "display_name": "Prod",
+                                      "available": 5}], current_skus=[])
+    d2c.sku_tree.selection_set("s1")
+    d2c._on_ok()
+    check("gui: AssignLicenseDialog._on_ok → result rempli",
+          d2c.result == ("s1", "add"), str(d2c.result))
+    d2c.destroy()
     # v2.1.2 : dialogue d'ajout de membre (corruptions BOKH/annotation)
     from gui.dialogs import _MemberPickDialog
     d3 = _MemberPickDialog(root, current_members=[{"id": "u0"}],

@@ -98,14 +98,10 @@ class BaseDialog(tk.Toplevel):
 
         self._build_ui(container)
 
-        # Taille : hauteur auto ou fixée
-        self.update_idletasks()
-        req_h = height or self.winfo_reqheight()
-        self.geometry(f"{width}x{req_h}")
-        center_dialog(self, parent)
-        self._geom_set = True
-
-        # Boutons Annuler / Valider en bas
+        # Boutons Annuler / Valider en bas. v2.1.7 : packés AVANT la
+        # mesure de hauteur — l'ancien code mesurait la fenêtre avant
+        # d'ajouter les boutons, qui restaient coupés/invisibles
+        # (ex. popup « Gérer les licences »).
         btn_frame = ttk.Frame(container)
         btn_frame.pack(side=tk.BOTTOM, fill=tk.X, pady=(15, 0))
         self.cancel_btn = ttk.Button(btn_frame, text="Annuler", command=self._on_cancel)
@@ -113,9 +109,36 @@ class BaseDialog(tk.Toplevel):
         self.ok_btn = ttk.Button(btn_frame, text="Valider", command=self._on_ok)
         self.ok_btn.pack(side=tk.RIGHT)
 
+        # Taille : hauteur auto ou fixée — calculée maintenant que les
+        # boutons font partie du layout.
+        self.update_idletasks()
+        req_h = height or self.winfo_reqheight()
+        self.geometry(f"{width}x{req_h}")
+        center_dialog(self, parent)
+        self._geom_set = True
+
         self.ok_btn.focus_set()
         self.wait_visibility()
         self.grab_set()
+        # v2.1.7 : personnalisation par la sous-classe (libellés des
+        # boutons, etc.) AVANT l'attente modale.
+        self._post_init()
+        # v2.1.7 CRITIQUE : modélité réelle. Sans wait_window(), le code
+        # appelant lisait self.result immédiatement après la construction
+        # (toujours None) : aucune action n'était jamais exécutée après
+        # « Valider » (ex. assignation de licences « ne faisait rien »).
+        # wait_window() rend la main uniquement à la fermeture du
+        # dialogue ; la boucle d'événements Tk continue de tourner.
+        self.wait_window(self)
+
+    def _post_init(self) -> None:
+        """Personnalisation post-construction (libellés de boutons...).
+
+        Appelé après la géométrie mais AVANT l'attente modale : les
+        sous-classes surchargent cette méthode au lieu de personnaliser
+        les boutons après super().__init__() (qui est désormais bloquant).
+        """
+        pass
 
     # --- à surcharger ------------------------------------------------
     def _build_ui(self, parent: ttk.Frame) -> None:
@@ -227,9 +250,8 @@ class UserCreateDialog(BaseDialog):
         if self.default_domain:
             ttk.Label(upn_frame, text=f"@{self.default_domain}").pack(side=tk.LEFT, padx=(4, 0))
         else:
-            self.domain_entry = ttk.Entry(upn_frame, width=18)
-            ttk.Label(upn_local, text="@").pack(side=tk.LEFT, padx=(4, 0))
             ttk.Label(upn_frame, text="@").pack(side=tk.LEFT, padx=(4, 0))
+            self.domain_entry = ttk.Entry(upn_frame, width=18)
             self.domain_entry.pack(side=tk.LEFT, padx=(4, 0))
 
         ttk.Label(form, text="Mot de passe:").grid(row=2, column=0, sticky=tk.W, padx=(0, 10), pady=4)
@@ -542,8 +564,9 @@ class UserDetailDialog(BaseDialog):
         self.user = user
         self.license_names = license_names or {}
         super().__init__(parent, "👤 Détails de l'utilisateur", width=560)
-        # BaseDialog crée les boutons APRÈS _build_ui : lecture seule →
-        # un seul bouton Fermer
+
+    def _post_init(self):
+        # Lecture seule → un seul bouton Fermer
         self.ok_btn.config(text="Fermer", command=self.destroy)
         self.cancel_btn.pack_forget()
 
@@ -645,17 +668,15 @@ class GroupCreateDialog(BaseDialog):
 
         ttk.Label(form, text="Description:").grid(row=2, column=0, sticky=tk.N, padx=(0, 10), pady=4)
         self.desc_text = tk.Text(form, height=3, width=36, relief="solid", borderwidth=1)
-        self.desc_text.grid(row=2, column=1, ok_to_place=True, sticky=tk.EW, pady=4)
-        self.desc_text.grid_remove()
+        self.desc_text.grid(row=2, column=1, sticky=tk.EW, pady=4)
 
-        self.error_label = ttk.Label(form, text="", foreground="row=0")
         self.error_label = ttk.Label(form, text="", foreground="red")
         self.error_label.grid(row=4, column=0, columnspan=2, sticky=tk.W)
 
         ttk.Label(
             form, text="* champ obligatoire — mailNickname déduit automatiquement du nom",
             foreground="gray"
-        ).grid(row=5, column=0, description_cspan=True, columnspan=2, sticky=tk.W, pady=(10, 0))
+        ).grid(row=5, column=0, columnspan=2, sticky=tk.W, pady=(10, 0))
 
     def _validate(self) -> Optional[str]:
         if not self.name_var.get().strip():
@@ -719,9 +740,12 @@ class MembersDialog(BaseDialog):
         self.on_refresh_members = on_refresh_members
         self.on_add_member = on_add_member
         self.on_remove_member = on_remove_member
-        super().__init__(parent, f"👥 Membres — {group_name}", width=640)
-        self.geometry(f"{640}x{520}")
-        # BaseDialog crée les boutons APRÈS _build_ui : personnalisation ici
+        # v2.1.7 : height passé à BaseDialog — __init__ est bloquant
+        # (attente modale), plus rien ne doit suivre super().__init__().
+        super().__init__(parent, f"👥 Membres — {group_name}", width=640, height=520)
+
+    def _post_init(self):
+        # BaseDialog crée ok_btn/cancel_btn : personnalisation ici
         self.ok_btn.pack_forget()
         self.cancel_btn.config(text="Fermer")
 
@@ -865,9 +889,11 @@ class _MemberPickDialog(BaseDialog):
         self.on_ok = on_ok
         self.load_users = load_users
         self.candidates: List[Dict[str, Any]] = []
-        super().__init__(parent, "➕ Ajouter un membre", width=580)
-        self.geometry(f"{580}x{480}")
-        # BaseDialog crée ok_btn/cancel_btn APRÈS _build_ui : on
+        # v2.1.7 : height passé à BaseDialog (attente modale bloquante)
+        super().__init__(parent, "➕ Ajouter un membre", width=580, height=480)
+
+    def _post_init(self):
+        # BaseDialog crée ok_btn/cancel_btn : on
         # personnalise les libellés ici.
         self.ok_btn.config(text="Ajouter")
         self.cancel_btn.config(text="Annuler")
@@ -946,14 +972,15 @@ class UnlicensedUsersDialog(BaseDialog):
     La liste est fournie déjà chargée par la fenêtre principale.
     """
 
-    def __user__(self): pass
     def __init__(self, parent: tk.Misc, users: List[Dict[str, Any]],
                  on_export: Optional[Callable[[List[Dict[str, Any]]], None]] = None):
         self.users = users or []
         self.on_export = on_export
-        super().__init__(parent, "👤 Utilisateurs sans licence", width=640)
-        self.geometry(f"{640}x{520}")
-        # Les boutons sont créés par BaseDialog APRÈS _build_ui : on les
+        # v2.1.7 : height passé à BaseDialog (attente modale bloquante)
+        super().__init__(parent, "👤 Utilisateurs sans licence", width=640, height=520)
+
+    def _post_init(self):
+        # Les boutons sont créés par BaseDialog : on les
         # personnalise ici (Fermer seul, pas d'Annuler).
         self.ok_btn.config(text="Fermer", command=self.destroy)
         self.cancel_btn.pack_forget()

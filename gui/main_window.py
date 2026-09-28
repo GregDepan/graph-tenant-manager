@@ -86,6 +86,8 @@ class GraphTenantManagerApp:
         self._groups_data: List[Dict] = []
         self._devices_data: List[Dict] = []
         self._licenses_data: List[Dict] = []
+        # v2.1.7 : récapitulatif multi-tenant du dashboard
+        self._portfolio_data: List[Dict[str, Any]] = []
 
         self.root.title(APP_TITLE)
         self.root.geometry("1280x800")
@@ -1088,75 +1090,182 @@ class GraphTenantManagerApp:
     def _load_dashboard(self):
         if not self.graph_wrapper:
             return
-        self._set_busy("Chargement du dashboard...")
+        # v2.1.7 : dashboard PORTFOLIO — récapitulatif de TOUS les
+        # tenants connectés (pas seulement le courant). Le tenant courant
+        # est scanné en premier ; chaque tenant est indépendant (une
+        # erreur de token sur l'un ne casse pas le récap des autres).
+        tenants = [self.current_tenant_id] + [
+            t for t in self.auth_manager.list_connected_tenants()
+            if t != self.current_tenant_id
+        ]
+        self._set_busy("Chargement du portefeuille multi-tenant...")
 
         def factory():
+            import asyncio as _a
+
+            async def scan_tenant(tid: str) -> Dict[str, Any]:
+                info: Dict[str, Any] = {
+                    "tenant_id": tid,
+                    "label": self._tenant_label(tid),
+                    "users": None, "groups": None, "devices": None,
+                    "licenses_total": 0, "licenses_consumed": 0,
+                    "alerts": [], "reduced": not self.auth_manager.has_workload_scopes(tid),
+                    "error": None,
+                }
+                try:
+                    if tid == self.current_tenant_id:
+                        wrapper = self.graph_wrapper
+                        if wrapper is None:
+                            raise RuntimeError("aucun tenant courant connecté")
+                    else:
+                        client = self.auth_manager.get_client(tid)
+                        if client is None:
+                            raise RuntimeError("client Graph absent (reconnectez-vous)")
+                        wrapper = GraphClientWrapper(client)
+                    users, groups, devices, licenses, tenant_info = await _a.gather(
+                        wrapper.get_tenant_users_count(),
+                        wrapper.get_tenant_groups_count(),
+                        wrapper.get_tenant_devices_count(),
+                        LicensesService(wrapper).get_inventory(),
+                        wrapper.get_tenant_info(),
+                    )
+                    info["users"] = users
+                    info["groups"] = groups
+                    info["devices"] = devices
+                    info["tenant_info"] = tenant_info
+                    info["licenses_total"] = sum(l.get('total', 0) for l in licenses or [])
+                    info["licenses_consumed"] = sum(l.get('consumed', 0) for l in licenses or [])
+                    info["alerts"] = [
+                        {"name": l.get("display_name") or l.get("part_number") or "?",
+                         "available": l.get("available", 0)}
+                        for l in licenses or [] if l.get("warning")
+                    ]
+                except Exception as e:
+                    info["error"] = str(e)[:140]
+                return info
+
             async def inner():
-                import asyncio as _a
-                users, groups, devices, tenant_info = await _a.gather(
-                    self.graph_wrapper.get_tenant_users_count(),
-                    self.graph_wrapper.get_tenant_groups_count(),
-                    self.graph_wrapper.get_tenant_devices_count(),
-                    self.graph_wrapper.get_tenant_info(),
-                )
-                licenses = await self.licenses_service.get_inventory()
-                return users, groups, devices, tenant_info, licenses
+                tasks = [scan_tenant(t) for t in tenants if t]
+                return await _a.gather(*tasks)
             return inner()
 
-        def on_ok(result):
-            users, groups, devices, tenant_info, licenses = result
-
+        def on_ok(portfolio):
             def apply():
-                self.tenant_info = tenant_info
-                self._licenses_data = licenses
-                self._display_dashboard(users, groups, devices, tenant_info, licenses)
-                self._set_idle("✓ Dashboard actualisé")
+                self._portfolio_data = list(portfolio or [])
+                # tenant_info du tenant COURANT conservé (domaine par défaut
+                # de la création d'utilisateur)
+                for p in self._portfolio_data:
+                    if p.get("tenant_id") == self.current_tenant_id:
+                        self.tenant_info = p.get("tenant_info")
+                        self._licenses_data = []
+                        break
+                self._display_dashboard(self._portfolio_data)
+                self._set_idle("✓ Portefeuille actualisé")
             self.root.after(0, apply)
 
         self.runner.run_in_thread(factory, callback=on_ok, error_callback=self._make_error_cb("Chargement du dashboard"))
 
-    def _display_dashboard(self, users, groups, devices, tenant_info, licenses):
+    def _display_dashboard(self, portfolio):
+        """v2.1.7 : récap multi-tenant (liste de dicts issus de _load_dashboard)."""
+        self._portfolio_data = list(portfolio or [])
+        portfolio = self._portfolio_data
         for widget in self.dashboard_tab.winfo_children():
             widget.destroy()
 
         main = ttk.Frame(self.dashboard_tab, padding="20")
         main.pack(fill=tk.BOTH, expand=True)
 
-        if tenant_info:
-            info = ttk.LabelFrame(main, text="Informations du Tenant", padding=10)
-            info.pack(fill=tk.X, pady=(0, 15))
-            ttk.Label(info, text=f"Nom: {tenant_info.get('display_name', 'N/A')}", style='Subtitle.TLabel').pack(anchor=tk.W)
-            ttk.Label(info, text=f"ID: {tenant_info.get('id', 'N/A')}").pack(anchor=tk.W)
+        if not portfolio:
+            ttk.Label(main, text="Aucun tenant connecté.",
+                      style='Subtitle.TLabel').pack(pady=20)
+            return
+
+        # ---- Cartes de synthèse globales ----
+        ok_rows = [p for p in portfolio if p.get("error") is None]
+        total_users = sum(p.get("users") or 0 for p in ok_rows)
+        total_consumed = sum(p.get("licenses_consumed") or 0 for p in ok_rows)
+        total_licenses = sum(p.get("licenses_total") or 0 for p in ok_rows)
+        total_alerts = sum(len(p.get("alerts") or []) for p in ok_rows)
+        reduced_count = sum(1 for p in portfolio if p.get("reduced"))
+        errors_count = len(portfolio) - len(ok_rows)
 
         stats = ttk.Frame(main)
-        stats.pack(fill=tk.X, pady=15)
-
-        total_consumed = sum(l.get('consumed', 0) for l in licenses)
-        total_licenses = sum(l.get('total', 0) for l in licenses)
-
+        stats.pack(fill=tk.X, pady=(0, 15))
         cards = [
-            ("👥 Utilisateurs", str(users)),
-            ("👥 Groupes", str(groups)),
-            ("📱 Appareils", str(devices)),
+            ("🏢 Tenants", f"{len(portfolio)}"),
+            ("👥 Utilisateurs", f"{total_users}"),
             ("🔑 Licences", f"{total_consumed} / {total_licenses}"),
+            ("⚠️ Alertes", f"{total_alerts}" + (f"  (dont {reduced_count} perms réduites)" if reduced_count else "")),
         ]
         for title, value in cards:
             card = ttk.LabelFrame(stats, text=title, padding=20)
             card.pack(side=tk.LEFT, padx=10, expand=True, fill=tk.BOTH)
-            ttk.Label(card, text=value, font=('Segoe UI', 22, 'bold')).pack()
+            ttk.Label(card, text=value, font=('Segoe UI', 20, 'bold')).pack()
+            if title.startswith("⚠️") and total_alerts:
+                ttk.Label(card, text="→ détails ci-dessous", foreground='red').pack()
 
-        alerts = ttk.LabelFrame(main, text="⚠️ Alertes", padding=10)
-        alerts.pack(fill=tk.X, pady=15)
-        warned = [l for l in licenses if l.get('warning')]
-        if warned:
-            ttk.Label(
-                alerts,
-                text=f"• {len(warned)} licence(s) en quantité critique (≤ 2 disponibles ou ≥ 95% consommées)",
-                foreground='red',
-            ).pack(anchor=tk.W)
-            ttk.Button(alerts, text="Voir l'onglet Licences", command=self._show_licenses).pack(anchor=tk.W, pady=6)
+        # ---- Tableau récapitulatif par tenant ----
+        recap = ttk.LabelFrame(main, text="📋 Récapitulatif par tenant", padding=10)
+        recap.pack(fill=tk.BOTH, expand=True, pady=(0, 12))
+
+        columns = ["Utilisateurs", "Groupes", "Appareils", "Licences", "Alertes", "Statut"]
+        widths = [90, 80, 80, 140, 80, 150]
+        tree = ttk.Treeview(recap, columns=columns, show='tree headings', height=max(6, len(portfolio)))
+        tree.heading("#0", text="Tenant")
+        tree.column("#0", width=220, stretch=True)
+        for i, col in enumerate(columns):
+            tree.heading(col, text=col)
+            tree.column(col, width=widths[i], anchor=tk.W)
+        scroll = ttk.Scrollbar(recap, orient=tk.VERTICAL, command=tree.yview)
+        tree.configure(yscrollcommand=scroll.set)
+        tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scroll.pack(side=tk.RIGHT, fill=tk.Y)
+        from gui.table_utils import make_sortable
+        make_sortable(tree)
+
+        for p in portfolio:
+            if p.get("error"):
+                lic_txt, statut = "—", f"❌ Erreur : {p['error'][:60]}"
+            else:
+                lic_txt = f"{p.get('licenses_consumed', 0)} / {p.get('licenses_total', 0)}"
+                n_alerts = len(p.get("alerts") or [])
+                statut = "⚠️ Permissions réduites" if p.get("reduced") else (
+                    f"🔴 {n_alerts} alerte(s)" if n_alerts else "🟢 OK"
+                )
+            tree.insert("", tk.END, text=p.get("label") or p.get("tenant_id", "?"), values=(
+                p.get("users") if p.get("users") is not None else "—",
+                p.get("groups") if p.get("groups") is not None else "—",
+                p.get("devices") if p.get("devices") is not None else "—",
+                lic_txt,
+                len(p.get("alerts") or []) if p.get("error") is None else "—",
+                statut,
+            ))
+        tree.tag_configure('cur', font=('Segoe UI', 9, 'bold'))
+        try:
+            tree.item(tree.get_children()[0], tags=('cur',))  # tenant courant en gras
+        except (tk.TclError, IndexError):
+            pass
+
+        # ---- Alertes détaillées par tenant ----
+        all_alerts = [(p.get("label") or "?", a) for p in portfolio for a in (p.get("alerts") or [])]
+        alerts = ttk.LabelFrame(main, text="⚠️ Alertes licences (tous tenants)", padding=10)
+        alerts.pack(fill=tk.X)
+        if all_alerts:
+            for label, a in all_alerts[:10]:
+                ttk.Label(
+                    alerts,
+                    text=f"• {label} — {a.get('name')} : {a.get('available')} restante(s)",
+                    foreground='red',
+                ).pack(anchor=tk.W)
+            if len(all_alerts) > 10:
+                ttk.Label(alerts, text=f"... et {len(all_alerts) - 10} autre(s)", foreground='red').pack(anchor=tk.W)
+        elif errors_count:
+            ttk.Label(alerts, text=f"⚠️ {errors_count} tenant(s) n'ont pas pu être scanné(s) "
+                                    f"(token expiré ? reconnectez-le depuis le sélecteur).",
+                      foreground='orange').pack(anchor=tk.W)
         else:
-            ttk.Label(alerts, text="Aucune alerte — tout est sous contrôle ✔", foreground='green').pack(anchor=tk.W)
+            ttk.Label(alerts, text="Aucune alerte — tout le portefeuille est sous contrôle ✔",
+                      foreground='green').pack(anchor=tk.W)
 
     # ================================================================
     # CONNEXION / TENANTS — v2.0 clé en main
@@ -1238,7 +1347,25 @@ class GraphTenantManagerApp:
             )
         else:
             self.connection_label.config(text="🟢 En ligne")
-        self._load_dashboard()
+        # v2.1.7 : recharge l'onglet COURANT (l'ancien code forçait le
+        # dashboard ; depuis un autre onglet, la liste restait vide
+        # jusqu'au prochain clic d'onglet après un changement de tenant).
+        self._reload_current_tab()
+
+    def _reload_current_tab(self):
+        """Recharge les données de l'onglet visible (après connexion ou
+        bascule de tenant). Dashboard → stats ; sinon lazy-load du
+        contenu via _on_tab_changed."""
+        if not self.graph_wrapper:
+            return
+        try:
+            tab = self.notebook.index(self.notebook.select())
+        except Exception:
+            tab = 0
+        if tab == 0:
+            self._load_dashboard()
+        else:
+            self._on_tab_changed(None)
 
     def _try_silent_reconnect(self):
         """
@@ -1313,6 +1440,32 @@ class GraphTenantManagerApp:
         self._devices_data = []
         self._licenses_data = []
         self.tenant_info = None
+        # v2.1.7 : vider AUSSI les treeviews principaux — l'ancien code
+        # ne vidait que les caches : après un changement de tenant, les
+        # tableaux affichaient encore les données du tenant précédent.
+        for tree in (getattr(self, 'users_tree', None),
+                     getattr(self, 'groups_tree', None),
+                     getattr(self, 'devices_tree', None),
+                     getattr(self, 'licenses_tree', None)):
+            if tree is not None:
+                try:
+                    tree.delete(*tree.get_children())
+                except tk.TclError:
+                    pass
+        # Reset des recherches/filtres (recherche du tenant précédent)
+        if getattr(self, 'user_search_var', None) is not None:
+            self.user_search_var.set("")
+        if getattr(self, 'group_type_var', None) is not None:
+            self.group_type_var.set("Tous")
+        # v2.1.7 : filtres instantanés des 9 tableaux (vars internes des
+        # TableEnhancer) — sinon l'ancien filtre masquerait les nouvelles
+        # données du tenant fraîchement chargées.
+        for enh in list(getattr(self, '_tree_enhancers', {}).values()):
+            if getattr(enh, 'filter_var', None) is not None:
+                try:
+                    enh.filter_var.set("")
+                except tk.TclError:
+                    pass
         # Workloads v2.1 : vider les treeviews + caches des panneaux
         for panel in (self.sharepoint_panel, self.onedrive_panel,
                       self.exchange_panel, self.teams_panel):
@@ -1360,7 +1513,13 @@ class GraphTenantManagerApp:
             self.tenant_var.set(current_label)
 
     def _on_tenant_selected(self, event):
-        """Bascule vers un tenant déjà connecté (switch mémoire, instantané)."""
+        """Bascule vers un tenant déjà connecté.
+
+        v2.1.7 : rebranchement COMPLET (wrapper Graph, services, vidage
+        des tableaux, rechargement de l'onglet courant). L'ancien code ne
+        basculait qu'en mémoire : les listes continuaient d'afficher le
+        tenant précédent et les services appelaient l'ancien client.
+        """
         if not getattr(self, "_tenant_labels", None):
             return
         label = self.tenant_var.get()
@@ -1376,7 +1535,6 @@ class GraphTenantManagerApp:
             if not self.auth_manager.set_current_tenant(tid):
                 raise RuntimeError(f"Tenant {tid} non connecté")
             self._register_connected_tenant(tid)
-            self.status_label.config(text=f"Statut: Connecté : {self._tenant_label(tid)}")
         except Exception as e:
             messagebox.showerror("Erreur", f"Impossible de basculer: {e}")
 
@@ -1515,7 +1673,7 @@ class GraphTenantManagerApp:
 
     def _show_about(self):
         messagebox.showinfo("À propos", (
-            "Graph Tenant Manager v1.1\n\n"
+            f"Graph Tenant Manager v{APP_VERSION_LOCAL}\n\n"
             "Outil de gestion multi-tenants Microsoft Graph\n"
             "pour administrateurs / MSP.\n\n"
             "Python 3.10+ · Microsoft Graph SDK · Tkinter"

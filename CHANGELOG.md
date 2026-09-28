@@ -1,5 +1,44 @@
 # Changelog — Graph Tenant Manager
 
+## v2.1.7 (28/09/2026) — Fixes terrain + Dashboard portefeuille
+
+### 🔧 Fix 3 bugs remontés du test terrain (issue #6)
+
+- **Dialogues réellement modaux — actions qui « ne faisaient rien »** :
+  `BaseDialog` n'attendait pas la fermeture (`wait_window()` absent) →
+  `dlg.result` était lu immédiatement après construction (toujours
+  `None`) → **aucune action après « Valider » n'était jamais exécutée**
+  (assignation/retrait de licences, création/modif utilisateur, réinit.
+  MDP, création de groupe, ajout de membre). Un seul correctif répare
+  tous les dialogues d'un coup.
+- **Popup « Gérer les licences » : boutons invisibles** : la hauteur
+  de fenêtre était calculée AVANT de packer les boutons Valider/Annuler
+  → coupés à l'écran. Les boutons sont maintenant intégrés au calcul.
+- **Listes non rafraîchies au changement de tenant** : le switch
+  rebranche maintenant tout (wrapper Graph, services, vidage des
+  tableaux, rechargement de l'onglet courant). `_clear_all_data()`
+  vide aussi les 4 treeviews principaux + les filtres instantanés.
+- Nettoyage de reliquats de corruption v2.1.2 dans `dialogs.py`
+  (kwargs invalides `ok_to_place` / `description_cspan`, label packé
+  dans un Entry, méthode `__user__` morte).
+
+### 📊 Dashboard portefeuille multi-tenant (nouveau)
+
+- Le dashboard ne montre plus UN tenant : il scanne **tous les
+  tenants connectés** et affiche :
+  - cartes de synthèse : nb de tenants, total utilisateurs, licences
+    consommées/achetées, nb d'alertes
+  - **tableau récapitulatif par tenant** (triable) : utilisateurs,
+    groupes, appareils, licences, alertes, statut (🟢 OK /
+    🔴 alertes / ⚠️ permissions réduites / ❌ erreur)
+  - alertes licences détaillées par tenant (max 10 affichées)
+- Un tenant en erreur de token ne casse pas le scan des autres
+  (ligne « ❌ Erreur » dans le tableau, message d'aide en bas).
+- Tenant courant en gras dans le tableau.
+
+### Divers
+- « À propos » affiche la vraie version (v1.1 codé en dur).
+
 ## v2.1.6 (25/09/2026) — Notification « à jour » sur le check manuel
 
 ### 🔔 Menu Aide → « Vérifier les mises à jour » notifie toujours
