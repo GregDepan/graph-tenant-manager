@@ -93,6 +93,28 @@ SKU_DISPLAY_NAMES: Dict[str, str] = {
 }
 
 
+# v2.1.9 : SKUs exclus de l'inventaire affiché (Power Automate) —
+# licences "gratuites"/auto-assignées qui polluent le listing sans
+# valeur de gestion : consommées automatiquement, jamais achetées.
+EXCLUDED_SKU_PREFIXES = ("POWER_AUTOMATE",)  # ex POWER_AUTOMATE_FREE
+EXCLUDED_SKU_PARTS = {
+    "FLOW_FREE",              # Power Automate (gratuit)
+    "POWERAPPS_VIRAL",        # Power Apps (essai) — même famille
+    "Microsoft_Power_Automate_Free",
+    "POWER_AUTOMATE_FREE",
+    "POWERAPPS_DEV",
+}
+
+
+def _is_excluded_sku(part_number: Optional[str]) -> bool:
+    """v2.1.9 : True si le SKU doit être masqué de l'inventaire."""
+    if not part_number:
+        return False
+    pn = str(part_number).upper()
+    return (pn in EXCLUDED_SKU_PARTS
+            or any(pn.startswith(p) for p in EXCLUDED_SKU_PREFIXES))
+
+
 def _sku_display_name(part_number: Optional[str]) -> str:
     """
     Retourne le nom commercial français d'un SKU.
@@ -197,6 +219,9 @@ class LicensesService:
         for sku in skus:
             sku_id = getattr(sku, "sku_id", None) or ""
             part_number = getattr(sku, "sku_part_number", None) or ""
+            # v2.1.9 : Power Automate & co masqués du listing
+            if _is_excluded_sku(part_number):
+                continue
             total = _total_enabled_units(getattr(sku, "prepaid_units", None))
             try:
                 consumed = int(getattr(sku, "consumed_units", 0) or 0)

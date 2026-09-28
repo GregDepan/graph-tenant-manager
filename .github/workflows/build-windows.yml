@@ -29,25 +29,57 @@ jobs:
           pip install pyinstaller
 
       - name: Build EXE
+        # v2.1.9 : --copy-metadata pour chaque package qui appelle
+        # importlib.metadata.version() à l'import (kiota, msgraph, azure).
+        # Sans ça l'exe plantait AU DÉMARRAGE :
+        #   PackageNotFoundError: No package metadata was found for
+        #   microsoft-kiota-abstractions
+        # (crash silencieux en --windowed : MessageBox native gardait le
+        # process en vie, le smoke test voyait « l'exe tourne — OK »).
         run: |
           pyinstaller --noconfirm --clean --onefile --windowed `
             --name "GraphTenantManager" `
             --icon assets/icon.ico `
             --add-data "assets;assets" `
+            --copy-metadata microsoft-kiota-abstractions `
+            --copy-metadata microsoft-kiota-authentication-azure `
+            --copy-metadata microsoft-kiota-http `
+            --copy-metadata microsoft-kiota-serialization-json `
+            --copy-metadata microsoft-kiota-serialization-text `
+            --copy-metadata microsoft-kiota-serialization-form `
+            --copy-metadata microsoft-kiota-serialization-multipart `
+            --copy-metadata msgraph-sdk `
+            --copy-metadata msgraph-core `
+            --copy-metadata azure-core `
+            --copy-metadata azure-identity `
             main.py
 
-      - name: Smoke test (import du binaire)
+      - name: Smoke test (le binaire démarre ET importe Graph)
+        # v2.1.9 : le smoke test passait à tort — en --windowed un crash
+        # au démarrage affiche une MessageBox native qui MAINTIENT le
+        # process en vie → « EXE tourne — OK » alors que l'app était morte.
+        # On teste maintenant les imports critiques via un alias : si
+        # Graph/msgraph ne s'importe pas (métadonnées absentes), le
+        # build échoue ici au lieu de chez le client.
         run: |
-          # L'exe se lance-t-il ? (mode windowed → pas de console, on teste l'exit code après 3s)
+          $env:GTM_SMOKE = "1"
           $proc = Start-Process -FilePath "dist\GraphTenantManager.exe" -PassThru
-          Start-Sleep -Seconds 3
+          Start-Sleep -Seconds 8
           if ($proc.HasExited) {
             if ($proc.ExitCode -ne 0) { throw "EXE crashed with exit code $($proc.ExitCode)" }
             Write-Host "EXE lancé puis fermé proprement"
           } else {
-            Write-Host "EXE tourne — OK"
+            Write-Host "EXE tourne — vérification des imports critiques..."
             Stop-Process -Id $proc.Id -Force
           }
+          # Vérification directe : le fichier de smoke interne doit exister
+          # (créé par main.py quand GTM_SMOKE=1 : importe msgraph + GUI puis
+          # s'arrête proprement avec exit 0).
+          if (-not (Test-Path "GTM_SMOKE_OK.txt")) {
+            throw "Smoke test KO : les imports critiques ont échoué (voir GTM_CRASH.log)"
+          }
+          Remove-Item "GTM_SMOKE_OK.txt" -Force
+          Write-Host "✓ Smoke test : imports Graph OK"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4

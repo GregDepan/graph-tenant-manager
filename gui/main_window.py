@@ -232,13 +232,14 @@ class GraphTenantManagerApp:
                         parent=self.root)
                     win.destroy()
                     return
-                # Application + relance : si ça échoue, l'ancienne
-                # version continue de fonctionner.
+                # v2.1.9 : apply_update ne fait plus sys.exit() (le thread
+                # worker n'y meurt que lui-même). Quand il rend True, le
+                # nouvel exe est déjà relancé : on ferme CETTE instance
+                # proprement depuis le main thread.
                 if updater.apply_update(path):
-                    # apply_update relance le nouvel exe et exit() :
-                    # cette ligne ne s'exécute que si sys.exit a été
-                    # contourné
-                    pass
+                    win.destroy()
+                    self._set_idle("✓ Mise à jour appliquée — relance...")
+                    self.root.after(200, self._exit_after_update)
                 else:
                     messagebox.showerror(
                         "Mise à jour",
@@ -255,8 +256,21 @@ class GraphTenantManagerApp:
                 win.destroy()
             self.root.after(0, apply)
 
-        self.runner.run_in_thread(do_download, callback=on_done,
-                                  error_callback=on_error)
+        self.runner.run_in_thread(do_download, callback=on_done, error_callback=on_error)
+
+    def _exit_after_update(self):
+        """v2.1.9 : fermeture propre après mise à jour appliquée.
+
+        Le nouvel exe est déjà relancé par apply_update() : on arrête le
+        runner asyncio puis on détruit la fenêtre — depuis le MAIN
+        thread (avant : sys.exit() dans le worker n'y tuait que le
+        thread, l'ancienne app restait ouverte en doublon).
+        """
+        try:
+            self.runner.stop()
+        except Exception:
+            pass
+        self.root.destroy()
 
     def _setup_styles(self):
         style = ttk.Style()
@@ -1211,6 +1225,10 @@ class GraphTenantManagerApp:
                     "licenses_total": 0, "licenses_consumed": 0,
                     "alerts": [], "reduced": not self.auth_manager.has_workload_scopes(tid),
                     "error": None,
+                    # v2.1.9 : distingo membres / invités / bloqués
+                    "members": 0, "guests": 0, "blocked": 0,
+                    # v2.1.9 : stockage OneDrive (None si perms réduites)
+                    "storage": None,
                 }
                 try:
                     if tid == self.current_tenant_id:
@@ -1222,17 +1240,29 @@ class GraphTenantManagerApp:
                         if client is None:
                             raise RuntimeError("client Graph absent (reconnectez-vous)")
                         wrapper = GraphClientWrapper(client)
-                    users, groups, devices, licenses, tenant_info = await _a.gather(
+                    # v2.1.9 : breakdown users (membres/invités/bloqués) +
+                    # quotas stockage OneDrive en parallèle du reste.
+                    has_workloads = self.auth_manager.has_workload_scopes(tid)
+                    users, groups, devices, licenses, tenant_info, breakdown = await _a.gather(
                         wrapper.get_tenant_users_count(),
                         wrapper.get_tenant_groups_count(),
                         wrapper.get_tenant_devices_count(),
                         LicensesService(wrapper).get_inventory(),
                         wrapper.get_tenant_info(),
+                        wrapper.get_users_breakdown(),
                     )
+                    if has_workloads:
+                        try:
+                            info["storage"] = await wrapper.get_storage_quota()
+                        except Exception as se:
+                            print(f"[Dashboard] Stockage indisponible pour {tid}: {se}")
                     info["users"] = users
                     info["groups"] = groups
                     info["devices"] = devices
                     info["tenant_info"] = tenant_info
+                    info["members"] = breakdown.get("members", 0)
+                    info["guests"] = breakdown.get("guests", 0)
+                    info["blocked"] = breakdown.get("blocked", 0)
                     info["licenses_total"] = sum(l.get('total', 0) for l in licenses or [])
                     info["licenses_consumed"] = sum(l.get('consumed', 0) for l in licenses or [])
                     info["alerts"] = [
@@ -1288,36 +1318,52 @@ class GraphTenantManagerApp:
         # ---- Cartes de synthèse globales ----
         ok_rows = [p for p in portfolio if p.get("error") is None]
         total_users = sum(p.get("users") or 0 for p in ok_rows)
+        total_members = sum(p.get("members") or 0 for p in ok_rows)
+        total_guests = sum(p.get("guests") or 0 for p in ok_rows)
+        total_blocked = sum(p.get("blocked") or 0 for p in ok_rows)
         total_consumed = sum(p.get("licenses_consumed") or 0 for p in ok_rows)
         total_licenses = sum(p.get("licenses_total") or 0 for p in ok_rows)
-        total_alerts = sum(len(p.get("alerts") or []) for p in ok_rows)
+        st_total = sum((p.get("storage") or {}).get("total", 0) for p in ok_rows if p.get("storage"))
+        st_used = sum((p.get("storage") or {}).get("used", 0) for p in ok_rows if p.get("storage"))
         reduced_count = sum(1 for p in portfolio if p.get("reduced"))
         errors_count = len(portfolio) - len(ok_rows)
+
+        def _human_bytes(n: float) -> str:
+            for unit, factor in (("To", 1024**4), ("Go", 1024**3), ("Mo", 1024**2)):
+                if n >= factor:
+                    v = n / factor
+                    return f"{v:.1f}".rstrip("0").rstrip(".").replace(".", ",") + " " + unit
+            return f"{int(n)} o"
 
         stats = ttk.Frame(main)
         stats.pack(fill=tk.X, pady=(0, 15))
         cards = [
             ("🏢 Tenants", f"{len(portfolio)}"),
-            ("👥 Utilisateurs", f"{total_users}"),
+            ("👥 Comptes", f"{total_users}"
+                           + (f"\n({total_members} membres, {total_guests} invités)" if total_users else "")),
             ("🔑 Licences", f"{total_consumed} / {total_licenses}"),
-            ("⚠️ Alertes", f"{total_alerts}" + (f"  (dont {reduced_count} perms réduites)" if reduced_count else "")),
+            ("💾 Stockage OneDrive", f"{_human_bytes(st_used)} / {_human_bytes(st_total)}"
+                                    if st_total else "—"),
         ]
         for title, value in cards:
             card = ttk.LabelFrame(stats, text=title, padding=20)
             card.pack(side=tk.LEFT, padx=10, expand=True, fill=tk.BOTH)
-            ttk.Label(card, text=value, font=('Segoe UI', 20, 'bold')).pack()
-            if title.startswith("⚠️") and total_alerts:
-                ttk.Label(card, text="→ détails ci-dessous", foreground='red').pack()
+            ttk.Label(card, text=value, font=('Segoe UI', 16, 'bold'), justify=tk.CENTER).pack()
+            if title == "👥 Comptes" and total_blocked:
+                ttk.Label(card, text=f"⛔ {total_blocked} bloqué(s)", foreground='red').pack()
+            if title == "🏢 Tenants" and errors_count:
+                ttk.Label(card, text=f"⚠️ {errors_count} en erreur", foreground='red').pack()
 
         # ---- Tableau récapitulatif par tenant ----
         recap = ttk.LabelFrame(main, text="📋 Récapitulatif par tenant", padding=10)
         recap.pack(fill=tk.BOTH, expand=True, pady=(0, 12))
 
-        columns = ["Utilisateurs", "Groupes", "Appareils", "Licences", "Alertes", "Statut"]
-        widths = [90, 80, 80, 140, 80, 150]
+        columns = ["Membres", "Invités", "Bloqués", "Groupes", "Appareils",
+                   "Licences", "Stockage", "Statut"]
+        widths = [80, 70, 70, 80, 80, 110, 150, 150]
         tree = ttk.Treeview(recap, columns=columns, show='tree headings', height=max(6, len(portfolio)))
         tree.heading("#0", text="Tenant")
-        tree.column("#0", width=220, stretch=True)
+        tree.column("#0", width=200, stretch=True)
         for i, col in enumerate(columns):
             tree.heading(col, text=col)
             tree.column(col, width=widths[i], anchor=tk.W)
@@ -1328,21 +1374,37 @@ class GraphTenantManagerApp:
         from gui.table_utils import make_sortable
         make_sortable(tree)
 
+        def _fmt_storage(p) -> str:
+            """v2.1.9 : « 1,2 / 5 To » — Go/Mo si petit, « — » si perms réduites."""
+            s = p.get("storage")
+            if not s:
+                return "—"
+            def human(n: float) -> str:
+                for unit, factor in (("To", 1024**4), ("Go", 1024**3), ("Mo", 1024**2)):
+                    if n >= factor:
+                        v = n / factor
+                        return f"{v:.1f}".rstrip("0").rstrip(".").replace(".", ",") + " " + unit
+                return f"{int(n)} o"
+            return f"{human(s.get('used', 0))} / {human(s.get('total', 0))}"
+
         for p in portfolio:
             if p.get("error"):
-                lic_txt, statut = "—", f"❌ Erreur : {p['error'][:60]}"
+                lic_txt, statut, sto_txt = "—", f"❌ Erreur : {p['error'][:60]}", "—"
             else:
                 lic_txt = f"{p.get('licenses_consumed', 0)} / {p.get('licenses_total', 0)}"
                 n_alerts = len(p.get("alerts") or [])
                 statut = "⚠️ Permissions réduites" if p.get("reduced") else (
                     f"🔴 {n_alerts} alerte(s)" if n_alerts else "🟢 OK"
                 )
+                sto_txt = _fmt_storage(p)
             tree.insert("", tk.END, text=p.get("label") or p.get("tenant_id", "?"), values=(
-                p.get("users") if p.get("users") is not None else "—",
+                p.get("members") if p.get("members") is not None else "—",
+                p.get("guests") if p.get("guests") is not None else "—",
+                p.get("blocked") if p.get("blocked") is not None else "—",
                 p.get("groups") if p.get("groups") is not None else "—",
                 p.get("devices") if p.get("devices") is not None else "—",
                 lic_txt,
-                len(p.get("alerts") or []) if p.get("error") is None else "—",
+                sto_txt,
                 statut,
             ))
         tree.tag_configure('cur', font=('Segoe UI', 9, 'bold'))
@@ -1351,26 +1413,31 @@ class GraphTenantManagerApp:
         except (tk.TclError, IndexError):
             pass
 
-        # ---- Alertes détaillées par tenant ----
-        all_alerts = [(p.get("label") or "?", a) for p in portfolio for a in (p.get("alerts") or [])]
-        alerts = ttk.LabelFrame(main, text="⚠️ Alertes licences (tous tenants)", padding=10)
-        alerts.pack(fill=tk.X)
-        if all_alerts:
-            for label, a in all_alerts[:10]:
+        # ---- Détail quotas de stockage par tenant (v2.1.9) ----
+        storage = ttk.LabelFrame(main, text="💾 Quotas de stockage OneDrive (par tenant)", padding=10)
+        storage.pack(fill=tk.X)
+        rows = [p for p in portfolio if p.get("error") is None]
+        any_storage = any(p.get("storage") for p in rows)
+        if any_storage:
+            for p in rows:
+                s = p.get("storage")
+                if not s:
+                    continue
+                total, used = s.get("total", 0), s.get("used", 0)
+                pct = (used * 100 / total) if total else 0
+                color = 'red' if pct >= 90 else ('orange' if pct >= 75 else 'green')
                 ttk.Label(
-                    alerts,
-                    text=f"• {label} — {a.get('name')} : {a.get('available')} restante(s)",
-                    foreground='red',
+                    storage,
+                    text=f"• {p.get('label') or '?'} : {_fmt_storage(p)} utilisés ({pct:.0f} %)",
+                    foreground=color,
                 ).pack(anchor=tk.W)
-            if len(all_alerts) > 10:
-                ttk.Label(alerts, text=f"... et {len(all_alerts) - 10} autre(s)", foreground='red').pack(anchor=tk.W)
-        elif errors_count:
-            ttk.Label(alerts, text=f"⚠️ {errors_count} tenant(s) n'ont pas pu être scanné(s) "
-                                    f"(token expiré ? reconnectez-le depuis le sélecteur).",
+        elif rows and all(p.get("reduced") for p in rows):
+            ttk.Label(storage, text="Quotas indisponibles : permissions réduites "
+                                    "(consentement admin des scopes workloads requis).",
                       foreground='orange').pack(anchor=tk.W)
         else:
-            ttk.Label(alerts, text="Aucune alerte — tout le portefeuille est sous contrôle ✔",
-                      foreground='green').pack(anchor=tk.W)
+            ttk.Label(storage, text="Aucune donnée de stockage disponible.",
+                      foreground='gray').pack(anchor=tk.W)
 
     # ================================================================
     # CONNEXION / TENANTS — v2.0 clé en main

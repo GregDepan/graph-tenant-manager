@@ -247,7 +247,11 @@ def apply_update(downloaded_exe: str) -> bool:
         logger.error("Mise à jour : copie impossible (%s)", exc)
         return False
 
-    # 3. relance du nouvel exe et fermeture de l'ancien process
+    # 3. relance du nouvel exe — v2.1.9 : on NE FAIT PLUS sys.exit() ici.
+    #    L'updater tourne dans un thread worker : sys.exit() n'y tuait
+    #    QUE le thread (SystemExit avalé), l'ancienne app restait ouverte
+    #    en double des fenêtres. La GUI ferme elle-même la fenêtre
+    #    principale (main thread) quand apply_update() rend True.
     try:
         subprocess.Popen([current], cwd=os.path.dirname(current),
                          close_fds=True)
@@ -256,4 +260,4 @@ def apply_update(downloaded_exe: str) -> bool:
         # l'app reste sur l'ancienne version — mais elle fonctionne
         return True
 
-    sys.exit(0)  # jamais atteint — sys.exit lève SystemExit
+    return True

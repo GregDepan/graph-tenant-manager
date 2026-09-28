@@ -600,3 +600,74 @@ class GraphClientWrapper:
             print(f"[Graph] Fallback comptage devices (pagination): {e}")
         devices = await self.get_all_devices()
         return len(devices)
+
+    async def get_users_breakdown(self) -> Dict[str, int]:
+        """
+        v2.1.9 : répartition des comptes du tenant — membres / invités /
+        bloqués — en UNE seule requête paginée (champs id,
+        accountEnabled, userType). Retourne un dict :
+
+            {"total": N, "members": N, "guests": N, "blocked": N,
+             "member_active": N, "guest_active": N}
+
+        Membre bloqué = compté dans members ET blocked.
+        Tolérant aux fautes : en cas d'échec API, tous les compteurs à 0.
+        """
+        out = {"total": 0, "members": 0, "guests": 0, "blocked": 0,
+               "member_active": 0, "guest_active": 0}
+        try:
+            users = await self.client.users.get()
+            items = self._page_result(users, None)
+        except Exception as e:
+            print(f"Erreur get_users_breakdown: {e}")
+            return out
+        for u in items:
+            out["total"] += 1
+            is_guest = (str(getattr(u, "user_type", "") or "").lower() == "guest")
+            enabled = bool(getattr(u, "account_enabled", True))
+            if is_guest:
+                out["guests"] += 1
+                if enabled:
+                    out["guest_active"] += 1
+            else:
+                out["members"] += 1
+                if enabled:
+                    out["member_active"] += 1
+            if not enabled:
+                out["blocked"] += 1
+        return out
+
+    async def get_storage_quota(self) -> Optional[Dict[str, Any]]:
+        """
+        v2.1.9 : stockage OneDrive du tenant — total / utilisé / reste
+        (octets), en sommant le quota des drives utilisateurs
+        (API /users/{id}/drive déjà utilisée par l'onglet OneDrive).
+
+        Nécessite Files.Read.All (scope workload — en permissions
+        réduites : retourne None, le dashboard affiche « — »).
+
+        Retourne {"total": o, "used": o, "remaining": o} ou None.
+        """
+        total = used = 0
+        users = []
+        try:
+            result = await self.client.users.get()
+            users = self._page_result(result, None)
+        except Exception as e:
+            print(f"[Graph] get_storage_quota: liste users indisponible ({e})")
+            return None
+        if not users:
+            return None
+        for u in users:
+            uid = getattr(u, "id", None)
+            if not uid:
+                continue
+            try:
+                drive = await self.client.users.by_user_id(uid).drive.get()
+                q = getattr(drive, "quota", None)
+                if q is not None:
+                    total += int(getattr(q, "total", 0) or 0)
+                    used += int(getattr(q, "used", 0) or 0)
+            except Exception:
+                continue  # user sans OneDrive provisionné
+        return {"total": total, "used": used, "remaining": total - used}

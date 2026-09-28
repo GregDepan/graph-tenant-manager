@@ -1,5 +1,43 @@
 # Changelog — Graph Tenant Manager
 
+## v2.1.9 (28/09/2026) — Fix auto-update + dashboard stockage/comptes
+
+### 🔧 Fix critique : l'auto-update cassait l'application
+Trois bugs distincts remontés du terrain :
+- **Le nouvel exe plantait au démarrage** — les packages kiota/msgraph
+  récents appellent `importlib.metadata.version()` à l'import ;
+  PyInstaller n'embarque pas ces métadonnées →
+  `PackageNotFoundError: microsoft-kiota-abstractions`. Fix :
+  `--copy-metadata` pour les 11 packages concernés dans la CI.
+- **Le smoke test CI passait à tort** — en `--windowed`, un crash au
+  démarrage affiche une MessageBox native qui MAINTIENT le process en
+  vie → « EXE tourne — OK ». Nouveau smoke test réel : `GTM_SMOKE=1`
+  importe msgraph/azure/GUI dans l'exe et exige `GTM_SMOKE_OK.txt`.
+- **L'app ne se fermait pas après la mise à jour** — `sys.exit(0)`
+  appelé depuis le thread worker n'y tuait que le thread (SystemExit
+  avalé) : ancienne app + nouvelle app ouvertes en doublon. La GUI
+  ferme maintenant proprement (`_exit_after_update`) après relance.
+- Bonus : tout crash de démarrage est maintenant journalisé dans
+  `GTM_CRASH.log` à côté de l'exe + MessageBox claire (fini le
+  `RuntimeError: lost sys.stdin` du `input()` en mode fenêtré).
+
+### 🚫 Licences Power Automate masquées
+- FLOW_FREE, POWER_AUTOMATE_*, POWERAPPS_VIRAL et apparentés
+  n'apparaissent plus dans l'inventaire (licences gratuites
+  auto-assignées, aucune valeur de gestion).
+
+### 📊 Dashboard : quotas de stockage + répartition des comptes
+- **Nouvelle section « 💾 Quotas de stockage OneDrive »** : total /
+  utilisé / % par tenant (somme des drives utilisateurs, octets
+  formatés Go/To), code couleur vert/orange/rouge (75 %/90 %).
+- **Répartition des comptes** : colonnes Membres / Invités / Bloqués
+  par tenant (une seule requête Graph), carte « 👥 Comptes » avec
+  détail membres/invités + badge bloqués.
+- La carte « ⚠️ Alertes licences » est retirée du dashboard (les
+  alertes restent visibles dans l'onglet Licences).
+- Stockage nécessite Files.Read.All (scopes workloads) : « — » en
+  permissions réduites, sans erreur.
+
 ## v2.1.8 (28/09/2026) — Cache local SQLite : affichage instantané
 
 ### ⚡ Fini les écrans vides et les « ⏳ Chargement... »

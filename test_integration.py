@@ -370,6 +370,12 @@ class FakeGraphWrapper:
         return 3
     async def get_tenant_devices_count(self):
         return 3
+    # v2.1.9 : breakdown membres/invités/bloqués + stockage
+    async def get_users_breakdown(self):
+        return {"total": 7, "members": 6, "guests": 1, "blocked": 2,
+                "member_active": 5, "guest_active": 0}
+    async def get_storage_quota(self):
+        return {"total": 7 * 1024**3, "used": 2 * 1024**3, "remaining": 5 * 1024**3}
     # ---- Workloads v2.1 ----
     async def get_all_sites(self, limit=None):
         return [FakeSite(1), FakeSite(2), FakeSite(3, personal=True)]
@@ -500,6 +506,29 @@ async def run_tests_async():
           len(SKU_DISPLAY_NAMES) == len(set(SKU_DISPLAY_NAMES)))
     check("licences: part number inconnu retourné tel quel",
           _sku_display_name("SKU_MYSTERIEUX") == "SKU_MYSTERIEUX")
+
+    # v2.1.9 : exclusion Power Automate & co de l'inventaire
+    from services.licenses_service import _is_excluded_sku
+    check("licences: FLOW_FREE exclu (Power Automate)",
+          _is_excluded_sku("FLOW_FREE") is True)
+    check("licences: POWER_AUTOMATE_* exclu (préfixe)",
+          _is_excluded_sku("POWER_AUTOMATE_FREE") is True and
+          _is_excluded_sku("Power_Automate_Pro") is True)
+    check("licences: POWERAPPS_VIRAL exclu",
+          _is_excluded_sku("POWERAPPS_VIRAL") is True)
+    check("licences: SPE_E3 NON exclu",
+          _is_excluded_sku("SPE_E3") is False)
+    check("licences: part number vide non exclu",
+          _is_excluded_sku("") is False and _is_excluded_sku(None) is False)
+    # Le service lui-même filtre bien (FakeGraphWrapper + SKU Power Automate)
+    class _FwWithFlow:
+        async def get_subscribed_skus(self):
+            return [FakeSku("SPE_E3", 25, 24), FakeSku("FLOW_FREE", 100, 100),
+                    FakeSku("AAD_PREMIUM", 100, 3)]
+    inv2 = await LicensesService(_FwWithFlow()).get_inventory()
+    check("licences: inventaire sans Power Automate (2 SKUs sur 3)",
+          len(inv2) == 2 and
+          all(i["part_number"] != "FLOW_FREE" for i in inv2))
 
     # v2.1.4 : $select explicite — sans lui Graph ne renvoie PAS
     # assignedLicenses/accountEnabled/department (bug « ✖ Aucune »).
@@ -816,9 +845,12 @@ if tk:
     portfolio = [
         {"tenant_id": "t-aaa", "label": "Contoso", "users": 7, "groups": 3, "devices": 3,
          "licenses_total": 25, "licenses_consumed": 24, "reduced": False,
+         "members": 6, "guests": 1, "blocked": 2,
+         "storage": {"total": 7 * 1024**3, "used": 2 * 1024**3, "remaining": 5 * 1024**3},
          "alerts": [{"name": "Microsoft 365 E3", "available": 1}], "error": None},
         {"tenant_id": "t-bbb", "label": "Fabrikam", "users": 12, "groups": 5, "devices": 8,
          "licenses_total": 40, "licenses_consumed": 10, "reduced": True,
+         "members": 11, "guests": 1, "blocked": 0, "storage": None,
          "alerts": [], "error": None},
     ]
     app._display_dashboard(portfolio)
