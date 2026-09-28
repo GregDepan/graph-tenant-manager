@@ -72,13 +72,18 @@ jobs:
             Write-Host "EXE tourne — vérification des imports critiques..."
             Stop-Process -Id $proc.Id -Force
           }
-          # Vérification directe : le fichier de smoke interne doit exister
-          # (créé par main.py quand GTM_SMOKE=1 : importe msgraph + GUI puis
-          # s'arrête proprement avec exit 0).
-          if (-not (Test-Path "GTM_SMOKE_OK.txt")) {
+          # Vérification directe : le fichier de smoke interne doit exister.
+          # Il est écrit par main.py à côté de l'EXE (BASE_PATH = dossier
+          # de l'exécutable en mode frozen) → dist\GTM_SMOKE_OK.txt.
+          if (-not (Test-Path "dist\GTM_SMOKE_OK.txt")) {
+            if (Test-Path "dist\GTM_CRASH.log") {
+              Write-Host "===== GTM_CRASH.log ====="
+              Get-Content "dist\GTM_CRASH.log"
+              Write-Host "========================="
+            }
             throw "Smoke test KO : les imports critiques ont échoué (voir GTM_CRASH.log)"
           }
-          Remove-Item "GTM_SMOKE_OK.txt" -Force
+          Remove-Item "dist\GTM_SMOKE_OK.txt" -Force
           Write-Host "✓ Smoke test : imports Graph OK"
 
       - name: Upload artifact
