@@ -129,6 +129,37 @@ check("run_in_thread() error_callback", len(err_caught) == 1 and isinstance(err_
 runner.stop()
 check("stop() propre", not runner.is_running)
 
+# ----------------------------------------------------------------------
+print("\n[3a] Cache local SQLite (v2.1.8 — affichage instantané)")
+from core import local_db
+
+_TID = "test-cache-tenant-0001"
+local_db.drop_tenant_cache(_TID)
+
+# Absent → None
+check("cache: absent → None",
+      local_db.load_collection(_TID, "users") is None)
+# Écriture + lecture
+fake_users = [{"id": "u1", "display_name": "Zoé", "email": "zoe@c.com"},
+              {"id": "u2", "display_name": "Alain", "email": "alain@c.com"}]
+ok_write = local_db.save_collection(_TID, "users", fake_users)
+check("cache: save_collection", ok_write)
+loaded = local_db.load_collection(_TID, "users")
+check("cache: load_collection round-trip", loaded == fake_users, f"{loaded!r}")
+# Âge du cache présent
+age = local_db.collection_age_seconds(_TID, "users")
+check("cache: âge ~ 0 s", age is not None and age < 5, f"âge={age}")
+# Isolation par tenant : autre tenant ne voit pas la collection
+check("cache: isolation inter-tenants",
+      local_db.load_collection("test-cache-tenant-0002", "users") is None)
+# Tenant ID exotique (caractères spéciaux) → nom de fichier sûr
+check("cache: GUID exotique sans crash",
+      local_db.save_collection("t/\\é#\"id", "x", [{"a": 1}]) is False or True)
+# Suppression
+check("cache: drop_tenant_cache", local_db.drop_tenant_cache(_TID))
+check("cache: après suppression → None",
+      local_db.load_collection(_TID, "users") is None)
+
 # ---------------------------------------------------------------- 3b. Auth v2.0 zéro-config
 print("\n[3b] Auth v2.0 — zéro config (client well-known Microsoft)")
 from core.auth import TenantAuthManager, WELL_KNOWN_CLIENT_ID, cache_dir, DEFAULT_SCOPES

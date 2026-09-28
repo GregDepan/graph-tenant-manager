@@ -18,6 +18,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from core.async_runner import AsyncRunner
 from core.auth import TenantAuthManager
 from core.graph_client import GraphClientWrapper
+from core import local_db
 from services.users_service import UsersService
 from services.groups_service import GroupsService
 from services.devices_service import DevicesService
@@ -54,6 +55,23 @@ def _looks_like_guid(s: str) -> bool:
                    for p in [parts[0], parts[1], parts[2], parts[3], parts[4]])
     except Exception:
         return False
+
+
+def _fmt_age(seconds: float) -> str:
+    """v2.1.8 : âge lisible d'un cache (« 3 min », « 2 h », « 5 j »)."""
+    try:
+        seconds = float(seconds)
+    except (TypeError, ValueError):
+        return "?"
+    if seconds < 0:
+        return "?"
+    if seconds < 60:
+        return f"{int(seconds)} s"
+    if seconds < 3600:
+        return f"{int(seconds // 60)} min"
+    if seconds < 86400:
+        return f"{int(seconds // 3600)} h"
+    return f"{int(seconds // 86400)} j"
 
 
 class GraphTenantManagerApp:
@@ -544,11 +562,19 @@ class GraphTenantManagerApp:
         self.users_tree.bind("<Double-1>", lambda e: self._user_details())
         self.users_tree.tag_configure('disabled_account', foreground='#888888')
 
-    def _load_users(self):
+    def _load_users(self, force_refresh: bool = False):
         users_service = self.users_service
         licenses_service = self.licenses_service
         if not users_service:
             return
+        tid = self.current_tenant_id
+        # v2.1.8 : cache-aside — affiche le cache immédiatement si dispo
+        # (bascule de tenant / retour d'onglet instantanés), puis
+        # rafraîchit en arrière-plan.
+        cached = local_db.load_collection(tid, "users") if tid else None
+        if cached and (self._users_data or []).__len__() == 0:
+            self._render_users(cached, from_cache=True)
+
         self._set_busy("Chargement des utilisateurs...")
 
         def factory():
@@ -564,9 +590,16 @@ class GraphTenantManagerApp:
                 return users
             return inner()
 
+        def on_fresh(users):
+            def apply():
+                if tid:
+                    local_db.save_collection(tid, "users", users)
+                self._render_users(users)
+            self.root.after(0, apply)
+
         self.runner.run_in_thread(
             factory,
-            callback=lambda result: self.root.after(0, lambda: self._render_users(result)),
+            callback=on_fresh,
             error_callback=self._make_error_cb("Chargement des utilisateurs"),
         )
 
@@ -599,7 +632,7 @@ class GraphTenantManagerApp:
             names.append(name or s)
         return "✔ " + ", ".join(names)
 
-    def _render_users(self, users):
+    def _render_users(self, users, from_cache: bool = False):
         self._users_data = users
         self.users_tree.delete(*self.users_tree.get_children())
         for u in users:
@@ -613,7 +646,14 @@ class GraphTenantManagerApp:
                 "Oui" if enabled else "Non",
                 u.get('user_principal_name', ''),
             ), tags=('disabled_account',) if not enabled else ())
-        self._set_idle(f"✓ {len(users)} utilisateurs chargés")
+        if from_cache:
+            # v2.1.8 : cache affiché — le refresh réseau arrive derrière
+            age = local_db.collection_age_seconds(self.current_tenant_id or "", "users")
+            if age is not None:
+                self._set_idle(f"✓ {len(users)} utilisateurs (cache local, "
+                               f"rafraîchi il y a {_fmt_age(age)})")
+        else:
+            self._set_idle(f"✓ {len(users)} utilisateurs chargés")
 
     def _search_users_action(self):
         term = self.user_search_var.get().strip()
@@ -837,10 +877,26 @@ class GraphTenantManagerApp:
     def _load_groups(self):
         if not self.groups_service:
             return
+        # v2.1.8 : cache-aside — affichage instantané depuis le cache local
+        cached = local_db.load_collection(self.current_tenant_id or "", "groups")
+        if cached and not self._groups_data:
+            self._groups_data = cached
+            self._render_groups()
+            age = local_db.collection_age_seconds(self.current_tenant_id or "", "groups")
+            if age is not None:
+                self._set_idle(f"✓ {len(cached)} groupes (cache, il y a {_fmt_age(age)})")
         self._set_busy("Chargement des groupes...")
+
+        def on_fresh(groups):
+            def apply():
+                if self.current_tenant_id:
+                    local_db.save_collection(self.current_tenant_id, "groups", groups)
+                self._apply_groups(groups)
+            self.root.after(0, apply)
+
         self.runner.run_in_thread(
             lambda: self.groups_service.get_all_groups_formatted(),
-            callback=lambda result: self.root.after(0, lambda: self._apply_groups(result)),
+            callback=on_fresh,
             error_callback=self._make_error_cb("Chargement des groupes"),
         )
 
@@ -989,10 +1045,26 @@ class GraphTenantManagerApp:
     def _load_devices(self):
         if not self.devices_service:
             return
+        # v2.1.8 : cache-aside — affichage instantané depuis le cache local
+        cached = local_db.load_collection(self.current_tenant_id or "", "devices")
+        if cached and not self._devices_data:
+            self._devices_data = cached
+            self._render_devices()
+            age = local_db.collection_age_seconds(self.current_tenant_id or "", "devices")
+            if age is not None:
+                self._set_idle(f"✓ {len(cached)} appareils (cache, il y a {_fmt_age(age)})")
         self._set_busy("Chargement des appareils...")
+
+        def on_fresh(devices):
+            def apply():
+                if self.current_tenant_id:
+                    local_db.save_collection(self.current_tenant_id, "devices", devices)
+                self._apply_devices(devices)
+            self.root.after(0, apply)
+
         self.runner.run_in_thread(
             lambda: self.devices_service.get_all_devices_formatted(),
-            callback=lambda result: self.root.after(0, lambda: self._apply_devices(result)),
+            callback=on_fresh,
             error_callback=self._make_error_cb("Chargement des appareils"),
         )
 
@@ -1044,14 +1116,26 @@ class GraphTenantManagerApp:
     def _load_licenses(self):
         if not self.licenses_service:
             return
+        # v2.1.8 : cache-aside — affichage instantané depuis le cache local
+        cached = local_db.load_collection(self.current_tenant_id or "", "licenses")
+        if cached and not self._licenses_data:
+            self._render_licenses(cached, from_cache=True)
         self._set_busy("Chargement des licences...")
+
+        def on_fresh(inventory):
+            def apply():
+                if self.current_tenant_id:
+                    local_db.save_collection(self.current_tenant_id, "licenses", inventory)
+                self._render_licenses(inventory)
+            self.root.after(0, apply)
+
         self.runner.run_in_thread(
             lambda: self.licenses_service.get_inventory(),
-            callback=lambda result: self.root.after(0, lambda: self._render_licenses(result)),
+            callback=on_fresh,
             error_callback=self._make_error_cb("Chargement des licences"),
         )
 
-    def _render_licenses(self, inventory):
+    def _render_licenses(self, inventory, from_cache: bool = False):
         self._licenses_data = inventory
         self.licenses_tree.delete(*self.licenses_tree.get_children())
         for lic in inventory:
@@ -1063,7 +1147,12 @@ class GraphTenantManagerApp:
                 lic.get('available', 0),
                 "⚠️" if lic.get('warning') else "OK",
             ), tags=('warning',) if lic.get('warning') else ())
-        self._set_idle(f"✓ {len(inventory)} licences listées")
+        if from_cache:
+            age = local_db.collection_age_seconds(self.current_tenant_id or "", "licenses")
+            if age is not None:
+                self._set_idle(f"✓ {len(inventory)} licences (cache, il y a {_fmt_age(age)})")
+        else:
+            self._set_idle(f"✓ {len(inventory)} licences listées")
 
     def _show_unlicensed_users(self):
         if not self.licenses_service:
@@ -1098,7 +1187,18 @@ class GraphTenantManagerApp:
             t for t in self.auth_manager.list_connected_tenants()
             if t != self.current_tenant_id
         ]
-        self._set_busy("Chargement du portefeuille multi-tenant...")
+        # v2.1.8 : affiche d'abord le DERNIER portefeuille connu (cache
+        # local, instantané) puis rafraîchit en arrière-plan — fini
+        # l'écran vide à chaque bascule/actualisation.
+        cached_pf = local_db.load_collection(self.current_tenant_id or "", "portfolio")
+        if cached_pf:
+            self._display_dashboard(cached_pf, from_cache=True)
+            age = local_db.collection_age_seconds(self.current_tenant_id or "", "portfolio")
+            if age is not None:
+                self._set_idle(f"✓ {len(cached_pf)} tenants (cache, il y a {_fmt_age(age)}) — "
+                               f"rafraîchissement en cours...")
+        else:
+            self._set_busy("Chargement du portefeuille multi-tenant...")
 
         def factory():
             import asyncio as _a
@@ -1152,6 +1252,10 @@ class GraphTenantManagerApp:
         def on_ok(portfolio):
             def apply():
                 self._portfolio_data = list(portfolio or [])
+                # v2.1.8 : persiste le portefeuille pour le prochain
+                # affichage instantané (clé = tenant courant)
+                if self.current_tenant_id:
+                    local_db.save_collection(self.current_tenant_id, "portfolio", self._portfolio_data)
                 # tenant_info du tenant COURANT conservé (domaine par défaut
                 # de la création d'utilisateur)
                 for p in self._portfolio_data:
@@ -1165,7 +1269,7 @@ class GraphTenantManagerApp:
 
         self.runner.run_in_thread(factory, callback=on_ok, error_callback=self._make_error_cb("Chargement du dashboard"))
 
-    def _display_dashboard(self, portfolio):
+    def _display_dashboard(self, portfolio, from_cache: bool = False):
         """v2.1.7 : récap multi-tenant (liste de dicts issus de _load_dashboard)."""
         self._portfolio_data = list(portfolio or [])
         portfolio = self._portfolio_data
@@ -1176,8 +1280,9 @@ class GraphTenantManagerApp:
         main.pack(fill=tk.BOTH, expand=True)
 
         if not portfolio:
-            ttk.Label(main, text="Aucun tenant connecté.",
-                      style='Subtitle.TLabel').pack(pady=20)
+            if not from_cache:
+                ttk.Label(main, text="Aucun tenant connecté.",
+                          style='Subtitle.TLabel').pack(pady=20)
             return
 
         # ---- Cartes de synthèse globales ----

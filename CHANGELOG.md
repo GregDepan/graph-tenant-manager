@@ -1,5 +1,25 @@
 # Changelog — Graph Tenant Manager
 
+## v2.1.8 (28/09/2026) — Cache local SQLite : affichage instantané
+
+### ⚡ Fini les écrans vides et les « ⏳ Chargement... »
+- Nouveau module `core/local_db.py` : **cache SQLite local** (une base
+  par tenant, stockée à côté des tokens dans
+  `%LOCALAPPDATA%/GraphTenantManager/cache/tenant_<guid>.sqlite`).
+- Pattern **cache-aside** sur le Dashboard portefeuille et les onglets
+  Utilisateurs / Groupes / Appareils / Licences :
+  1. l'UI affiche **immédiatement** les dernières données connues ;
+  2. le rafraîchissement Graph démarre en arrière-plan ;
+  3. à l'arrivée, le cache est mis à jour et l'affichage rafraîchi.
+- Bascule de tenant / retour sur un onglet = **millisecondes** au lieu
+  de plusieurs secondes de spinner.
+- La barre de statut indique la fraîcheur pendant le rafraîchissement
+  (« ✓ 214 utilisateurs (cache local, rafraîchi il y a 3 min) »).
+- Robustesse : cache corrompu ou absent ne casse jamais l'application
+  (retour réseau direct) ; mode WAL pour lectures concurrentes sûres ;
+  écritures verrouillées + retry.
+- `_fmt_age()` : âge lisible (« 3 min », « 2 h », « 5 j »).
+
 ## v2.1.7 (28/09/2026) — Fixes terrain + Dashboard portefeuille
 
 ### 🔧 Fix 3 bugs remontés du test terrain (issue #6)
